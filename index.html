@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>LGNS Terminal · AiLGNS 链上数据终端</title>
+<meta name="description" content="AiLGNS / AWAKE HELIX 链上数据终端：价格、K 线、五池、储备、排放、算力、销毁资格、治理、涡轮、持币、地址查询、合约权限。本地运行，只读公开数据。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%231d3f8f'/%3E%3Ctext x='32' y='42' font-size='24' font-family='Menlo,monospace' font-weight='800' text-anchor='middle' fill='%23fff'%3ELT%3C/text%3E%3C/svg%3E">
+<script>try{var t=localStorage.getItem("lt-theme");if(t==="dark")document.documentElement.setAttribute("data-theme","dark")}catch(e){}</script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="strip"><div class="strip-in" id="strip"><div class="it"><span>正在连接 Anubis 链与官方接口…</span></div></div></div>
+<header class="hdr">
+  <div class="hdr-in">
+    <button class="ib" id="menuBtn" aria-label="菜单">☰</button>
+    <a class="brand" href="#/overview"><span class="lg">LT</span><span><b>LGNS Terminal</b><small>AiLGNS · Anubis Chain</small></span></a>
+    <form class="hsearch" id="hs" autocomplete="off"><input id="hsIn" placeholder="粘贴 0x 钱包地址，回车直接查" spellcheck="false" aria-label="搜索地址"></form>
+    <div class="hbtns">
+      <button class="ib" id="themeBtn" title="深色 / 浅色">◐</button>
+      <button class="ib" id="refreshBtn" title="立即刷新">↻</button>
+    </div>
+  </div>
+</header>
+<div class="layout">
+  <nav class="side" id="side" aria-label="导航"></nav>
+  <main id="main" tabindex="-1"><div class="wrap" id="page"></div></main>
+</div>
+<div class="tip" id="tip" role="tooltip"></div>
+<div class="modal" id="modal" hidden><div class="modal-box" role="dialog" aria-modal="true"><button class="modal-x" data-close aria-label="关闭">×</button><div id="modalBody"></div></div></div>
+<script src="app.js"></script>
+</body>
+</html>

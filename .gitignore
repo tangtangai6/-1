@@ -1,0 +1,5 @@
+data/
+site/
+LGNS-Terminal.html
+*.tmp
+.DS_Store
