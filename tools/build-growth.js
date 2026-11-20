@@ -26,6 +26,8 @@ const t0 = Date.now();
 const s = JSON.parse(fs.readFileSync(STATE, "utf8"));
 const n = s.addrs.length, par = s.par, addrs = s.addrs, ts = s.ts, flag = s.flag, day1 = s.day1;
 const NF = 8, WINDOW = 7, FROM = Math.max(1, CURDAY - WINDOW + 1);
+const LARGE = +opt("large", 10000), CAP = 8, HUGE_AT = +opt("huge", 100000);
+const BASE = 61, STRIDE = BASE + 1 + CAP * 8;
 const dayOf = t => (t < day1 ? 0 : Math.floor((t - day1) / 86400) + 1);
 console.log(`节点 ${n.toLocaleString()} · 当前第 ${CURDAY} 天 · 窗口 ${FROM}-${CURDAY}`);
 
@@ -53,6 +55,10 @@ if (t !== n) console.warn(`警告：只遍历到 ${t}/${n} 个节点`);
 const size = new Uint32Array(n);
 for (let k = t - 1; k >= 0; k--) { const u = order[k]; if (par[u] >= 0) size[par[u]] += size[u] + 1; }
 console.log(`DFS 完成 ${(Date.now() - t0) / 1000}s`);
+const parentDfs = new Uint32Array(n).fill(0xFFFFFFFF);
+for (let i = 0; i < n; i++) if (par[i] >= 0) parentDfs[dfs[i]] = dfs[par[i]];
+const sizeDfs = new Uint32Array(n);
+for (let i = 0; i < n; i++) sizeDfs[dfs[i]] = size[i];
 
 /* ---- 近 7 天活动记录 ---- */
 const recs = [];
@@ -81,7 +87,7 @@ console.log(`记录 ${recs.length.toLocaleString()} 条（其中新加入 ${join
 /* ---- 写记录分块（按 dfsId >> 16） ---- */
 fs.rmSync(OUT, { recursive: true, force: true });
 for (const d of ["hash", "refs", "rec", "lineaddr"]) fs.mkdirSync(path.join(OUT, d), { recursive: true });
-const STRIDE = 61, BLOCK = 1 << 16;
+const BLOCK = 1 << 16;
 const blocks = new Map();
 for (const r of recs) {
   const b = r.d >>> 16;
@@ -106,6 +112,14 @@ for (const [b, arr] of blocks) {
     buf.writeFloatLE(r.veAi, o + 33);
     buf.writeFloatLE(r.fundDai, o + 37);
     Buffer.from(r.a.slice(2), "hex").copy(buf, o + 41, 0, 20);
+    let an = 0, ao = o + BASE + 1, v = r.d;
+    while (true) {
+      const p = parentDfs[v];
+      if (p === 0xFFFFFFFF) break;
+      if (sizeDfs[p] > LARGE && an < CAP) { buf.writeUInt32LE(p, ao); buf.writeUInt32LE(v, ao + 4); ao += 8; an++; }
+      v = p;
+    }
+    buf.writeUInt8(an, o + BASE);
     o += STRIDE;
   }
   fs.writeFileSync(path.join(OUT, "rec", pad4(b) + ".bin"), buf);
@@ -113,15 +127,13 @@ for (const [b, arr] of blocks) {
 const recBlocks = blocks.size, maxBlock = recBlocks ? Math.max(...blocks.keys()) : -1;
 
 /* ---- 父指针 + 直推线地址（供按查询地址回溯所属直推线） ---- */
-const parentDfs = new Uint32Array(n).fill(0xFFFFFFFF);
-for (let i = 0; i < n; i++) if (par[i] >= 0) parentDfs[dfs[i]] = dfs[par[i]];
 const pbuf = Buffer.alloc(n * 4);
 for (let i = 0; i < n; i++) pbuf.writeUInt32LE(parentDfs[i], i * 4);
 fs.writeFileSync(path.join(OUT, "parent.bin"), pbuf);
 
 const lineBlocks = new Map();
 for (let i = 0; i < n; i++) {
-  if (size[i] <= 0) continue;
+  if (par[i] < 0) continue;
   const d = dfs[i], b = d >>> 16;
   let arr = lineBlocks.get(b); if (!arr) lineBlocks.set(b, arr = []);
   arr.push([d, addrs[i]]);
@@ -193,7 +205,8 @@ const meta = {
   refs: { chunkShift: CHUNK_SHF, chunks: refChunks },
   parent: { bytes: n * 4 },
   lineaddr: { blockShift: 16, blocks: lineMax + 1 },
-  rec: { blockShift: 16, blocks: maxBlock + 1, stride: STRIDE },
+  rec: { blockShift: 16, blocks: maxBlock + 1, stride: STRIDE, large: LARGE, largeCap: CAP },
+  hugeAt: HUGE_AT,
   maxProbe,
 };
 // rec.blocks 需要按最大块号 +1，重新数一遍块号

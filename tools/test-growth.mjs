@@ -27,7 +27,7 @@ const flows = [
 ];
 fs.writeFileSync(path.join(tmp, "state.json"), JSON.stringify({ v: 1, cursor: 100, day1, addrs, par, ts, flag, flows, veSet: [] }));
 
-execFileSync(process.execPath, [path.join(root, "tools/build-growth.js"), "--state", path.join(tmp, "state.json"), "--curday", "10", "--out", path.join(tmp, "growth")], { stdio: "inherit" });
+execFileSync(process.execPath, [path.join(root, "tools/build-growth.js"), "--state", path.join(tmp, "state.json"), "--curday", "10", "--large", "0", "--huge", "0", "--out", path.join(tmp, "growth")], { stdio: "inherit" });
 
 const out = path.join(tmp, "growth");
 const meta = JSON.parse(fs.readFileSync(path.join(out, "meta.json"), "utf8"));
@@ -45,8 +45,9 @@ const rx = await queryTeam("0x" + "9".repeat(40), read, meta);
 console.log("unknown:", JSON.stringify({ found: rx.found, reason: rx.reason }));
 
 const byAddr = Object.fromEntries(ra.rows.map(r => [r.a, r.line]));
-const lineOk = byAddr[B] === B && byAddr[C] === C && byAddr[D] === B && byAddr[G] === B && byAddr[E] === C;
-console.log("lines:", JSON.stringify({ B: byAddr[B], C: byAddr[C], D: byAddr[D], G: byAddr[G], E: byAddr[E] }));
+const dLine = rd.rows[0] && rd.rows[0].line;
+const lineOk = byAddr[B] === B && byAddr[C] === C && byAddr[D] === B && byAddr[G] === B && byAddr[E] === C && dLine === G;
+console.log("lines:", JSON.stringify({ B: byAddr[B], C: byAddr[C], D: byAddr[D], G: byAddr[G], E: byAddr[E], DLine: dLine }));
 const ok = ra.found && ra.count === 5 && Math.abs(ra.totals.d0.dai - 130) < 1e-6 && Math.abs(ra.totals.d0.power - 17) < 1e-6
   && Math.abs(ra.totals.d1.turbDai - 50) < 1e-6 && Math.abs(ra.totals.d7.veAi - 20) < 1e-6
   && rd.found && rd.count === 1 && Math.abs(rd.totals.d0.dai - 30) < 1e-6 && !rx.found && lineOk;

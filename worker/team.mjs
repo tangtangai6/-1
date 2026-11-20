@@ -6,7 +6,7 @@
 let PARENT = null, PARENT_AT = 0;
 const LINE_CACHE = new Map();
 const METRICS = ["joins", "dai", "power", "turbDai", "turbAi", "burnCnt", "burnLgns", "veAi", "fundDai"];
-const STRIDE = 61;
+const BASE = 61;
 
 function fnv(hex) {
   let h = 0x811c9dc5;
@@ -30,6 +30,7 @@ function add(dst, src) {
 
 export async function queryTeam(addr, read, meta) {
   addr = String(addr || "").toLowerCase();
+  const STRIDE = meta.rec.stride || 61;
   const cache = new Map();
   const get = async p => {
     let b = cache.get(p);
@@ -61,7 +62,7 @@ export async function queryTeam(addr, read, meta) {
   const start = rdv.getUint32(roff, true), size = rdv.getUint32(roff + 4, true);
   if (!size) return { ...base, found: false, reason: "该地址没有下级" };
   const lastDfs = start + size; // size 不含自己：子树区间 = (start, start+size]
-  const huge = size > 100000; // 超大团队跳过直推线计算，避免超过 Worker CPU 上限
+  const huge = size > (meta.hugeAt || 100000); // 超大团队用构建时预存的“大祖先→直推线”条目，不再逐层爬树
 
   /* 2.5 父指针 + 直推线：从记录节点往上走到查询地址的第一层下级 */
   let par = null;
@@ -102,17 +103,25 @@ export async function queryTeam(addr, read, meta) {
       const a = hexAddr(dv, o + 41);
       if (!huge && !lineCache.has(d)) lineCache.set(d, lineOf(d));
       let row = map.get(a);
-      if (!row) map.set(a, row = { a, d0: blank(), d1: blank(), d7: blank(), lineDfs: huge ? -1 : (lineCache.get(d) ?? lineOf(d)) });
+      if (!row) {
+        let ln = -1;
+        if (huge) {
+          const an = dv.getUint8(o + BASE);
+          for (let k = 0; k < an; k++) {
+            const ao2 = o + BASE + 1 + k * 8;
+            if (dv.getUint32(ao2, true) === start) { ln = dv.getUint32(ao2 + 4, true); break; }
+          }
+        } else ln = lineCache.get(d) ?? lineOf(d);
+        map.set(a, row = { a, d0: blank(), d1: blank(), d7: blank(), lineDfs: ln });
+      }
       add(row.d7, rec);
       if (day === d0) add(row.d0, rec);
       if (day === d1) add(row.d1, rec);
     }
   }
   const rows = [...map.values()];
-  if (huge) {
-    for (const r of rows) { r.line = null; delete r.lineDfs; }
-  } else {
-    const lineIds = new Set(rows.map(r => r.lineDfs));
+  {
+    const lineIds = new Set(rows.map(r => r.lineDfs).filter(id => id >= 0));
     const byBlock = new Map();
     for (const id of lineIds) { const b = id >>> meta.lineaddr.blockShift; let arr = byBlock.get(b); if (!arr) byBlock.set(b, arr = []); arr.push(id); }
     const lineAddr = new Map();
@@ -135,5 +144,7 @@ export async function queryTeam(addr, read, meta) {
   const totals = { d0: blank(), d1: blank(), d7: blank() };
   for (const r of rows) { add(totals.d0, r.d0); add(totals.d1, r.d1); add(totals.d7, r.d7); }
   for (const r of rows) for (const w of ["d0", "d1", "d7"]) { delete r[w].burnCnt; delete r[w].fundDai; delete r[w].turbAi; }
-  return { ...base, found: true, totals, rows, count: rows.length, start, size, lineUnavailable: huge };
+  const lineMissing = rows.some(r => !r.line);
+  return { ...base, found: true, totals, rows, count: rows.length, start, size, lineUnavailable: huge && lineMissing };
+
 }
