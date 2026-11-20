@@ -99,7 +99,7 @@ const call = (to, sel, ...args) => ({ to, data: SEL[sel] + args.map(a => typeof 
 
 /* ================= 数据层 ================= */
 const D = { at: 0, health: {} };
-const Q = { burnDay: 0, burners: {}, elig: null, eligAddr: "", addr: null, addrQ: "", holders: [], holdersNext: null, holdersBusy: false, rank: "day", rankData: {}, kline: "1h", klineData: {}, burnSearch: "", calc: {}, perms: null, permsBusy: false, actOff: 0, team: { addr: "", for: "", win: "d7", data: null, loading: false, err: "", q: "", sort: "dai", dir: -1, open: [false, false, false, false], bpage: [0, 0, 0, 0] } };
+const Q = { burnDay: 0, burners: {}, elig: null, eligAddr: "", addr: null, addrQ: "", holders: [], holdersNext: null, holdersBusy: false, rank: "day", rankData: {}, kline: "1h", klineData: {}, burnSearch: "", calc: {}, perms: null, permsBusy: false, actOff: 0, team: { addr: "", for: "", win: "d7", data: null, loading: false, err: "", q: "", sort: "dai", dir: -1, open: [false, false, false, false], bpage: [0, 0, 0, 0], started: 0, tick: null } };
 const HN = { ov: "官方 /overview", feed: "官方 /overview/feed", pw: "官方 /power", em: "官方 /emission", pr: "官方 /protocol", ve: "官方 /ve", pools: "官方 /pools", tb: "官方 /turbine", pol: "官方 /pol", lv: "官方 /level", price: "官方 /price", ga: "官方 /gauge", k1: "官方 /kline", ch: "Anubis 链 RPC", hc: "Blockscout", my: "本地采集器" };
 async function safe(name, fn) { const t = Date.now(); try { const v = await fn(); D.health[name] = { ok: true, ms: Date.now() - t }; return v; } catch (e) { D.health[name] = { ok: false, ms: Date.now() - t, err: String(e.message || e) }; return null; } }
 
@@ -913,14 +913,18 @@ async function loadTeam(addr) {
   addr = String(addr || "").toLowerCase();
   if (!isAddr(addr)) return;
   Q.team.addr = addr; Q.team.for = ""; Q.team.data = null; Q.team.loading = true; Q.team.err = ""; Q.team.open = [false, false, false, false]; Q.team.bpage = [0, 0, 0, 0];
+  Q.team.started = Date.now();
   if (route().p === "growth") render();
+  const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 90000);
   try {
-    const r = await fetch(`/api/team?addr=${addr}`, { credentials: "same-origin", headers: { accept: "application/json" } });
+    const r = await fetch(`/api/team?addr=${addr}`, { credentials: "same-origin", headers: { accept: "application/json" }, signal: ctl.signal });
     if (r.status === 401) { location.href = "/login"; return; }
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
     Q.team.data = j; Q.team.for = addr;
-  } catch (e) { Q.team.err = String((e && e.message) || e); }
+  } catch (e) {
+    Q.team.err = (e && e.name === "AbortError") ? "查询超时（90 秒）。这个团队太大，建议改查它的某个直推线地址。" : /50[34]/.test(String(e && e.message)) ? "服务器计算超时（HTTP 503）。这个团队太大，建议改查它的某个直推线地址。" : String((e && e.message) || e);
+  } finally { clearTimeout(to); }
   Q.team.loading = false;
   if (route().p === "growth") render();
 }
@@ -948,7 +952,12 @@ function pageGrowth(arg) {
   const form = `<div class="card"><form class="form" id="teamForm"><input id="teamIn" placeholder="输入 0x 团队长地址" value="${esc(Q.team.addr)}" autocomplete="off" spellcheck="false"><button class="btn">查询</button></form>
 <div class="row mt"><div class="seg" id="teamSeg">${TEAM_WIN.map(([k, n]) => `<button data-tw="${k}" class="${Q.team.win === k ? "on" : ""}">${n}</button>`).join("")}</div><span class="tag il ml">${Q.team.data ? `协议第 ${Q.team.data.curDay} 天 · 更新于 ${ago(Q.team.data.at || Date.now())}` : "每 30 分钟更新"}</span></div></div>`;
   if (!Q.team.addr) return head + form + `<div class="card mt"><p class="note" style="margin:0">粘贴任意地址查询。结果按所选时间段的「入金 DAI」分成 4 个分区：≥1 万、5 千–1 万、1 千–5 千、<1 千；分区默认收起，点标题展开。</p></div>`;
-  if (Q.team.loading) return head + form + `<div class="card mt"><div class="empty">正在查询伞下新增…</div></div>`;
+  if (Q.team.loading) {
+    const sec = Math.max(0, Math.round((Date.now() - (Q.team.started || Date.now())) / 1000));
+    if (!Q.team.tick) Q.team.tick = setTimeout(() => { Q.team.tick = null; if (Q.team.loading && route().p === "growth") render(); }, 1000);
+    return head + form + `<div class="card mt"><div class="empty">正在查询伞下新增…${sec >= 3 ? `（已 ${sec} 秒，大团队可能需要 10–20 秒）` : ""}</div></div>`;
+  }
+  Q.team.tick = null;
   if (Q.team.err) return head + form + `<div class="verdict no">查询失败：${esc(Q.team.err)}</div>`;
   const d = Q.team.data;
   if (!d) return head + form;
@@ -986,10 +995,11 @@ ${kpi("伞下锁仓", fmt(T.veAi, 4), "AiLGNS", `销毁 ${fmt(T.burnLgns, 0)} LG
   const lineDai = lines.reduce((s, l) => s + l.m.dai, 0);
   const lineTable = `<div class="card mt"><div class="row" style="padding:10px 14px"><b>直推线汇总</b><span class="tag il ml">${fmt(lines.length, 0)} 条线</span><span class="ml">合计 ${fmt(lineDai, 2)} DAI</span><span style="flex:1"></span><button class="btn gh sm" id="teamLineCsv">导出直推线 CSV</button></div><div class="scroll maxh"><table class="tbl"><thead><tr><th>直推线</th><th class="r">人数</th><th class="r">入金 DAI</th><th class="r">新加入</th><th class="r">新增算力</th><th class="r">涡轮 DAI</th><th class="r">锁仓 AiLGNS</th></tr></thead><tbody>${lines.map(l => `<tr><td>${addrLink(l.a)}</td><td class="r">${fmt(l.n, 0)}</td><td class="r"><b>${fmt(l.m.dai, 2)}</b></td><td class="r">${fmt(l.m.joins, 0)}</td><td class="r">${cp(l.m.power)}</td><td class="r">${fmt(l.m.turbDai, 2)}</td><td class="r">${fmt(l.m.veAi, 4)}</td></tr>`).join("") || `<tr><td colspan="7" class="empty">这段时间没有直推线新增</td></tr>`}</tbody></table></div></div>`;
 
+  const hugeNote = d.lineUnavailable ? `<p class="note" style="color:#b7791f">这个团队超过 10 万人，本次不计算「直推线」列（避免服务器超时）；其余数据正常。想按直推线看，请查询某条直推线的地址。</p>` : "";
   return head + form +
     `<div class="card mt"><div class="row"><b class="mono" style="word-break:break-all">${esc(d.addr)}</b><span class="ml">伞下 ${fmt(d.size, 0)} 人</span><span class="ml">${addrLink(d.addr, "看这个地址 →")}</span></div></div>` + kpis +
     `<div class="card mt"><div class="row"><input id="teamQ" placeholder="按地址搜索" value="${esc(Q.team.q)}" style="max-width:300px"><span class="tag il ml">${fmt(list.length, 0)} 个地址有新增</span><span style="flex:1"></span><button class="btn gh sm" id="teamAll">${anyOpen ? "全部收起" : "全部展开"}</button><button class="btn gh sm" id="teamCsv">导出 CSV</button></div></div>` +
-    lineTable +
+    hugeNote + (d.lineUnavailable ? "" : lineTable) +
     `<div class="note mt">按所选时间段的「入金 DAI」分区；点分区标题展开/收起，展开后每页 50 条。</div>` +
     sections +
     `<p class="note">「新增」按协议日统计，含入金、涡轮、锁仓、销毁与新加入；数字为采集器快照，上方显示更新时间。</p>`;

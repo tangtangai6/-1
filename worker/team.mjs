@@ -3,6 +3,8 @@
    meta 来自 growth-data/meta.json */
 "use strict";
 
+let PARENT = null, PARENT_AT = 0;
+const LINE_CACHE = new Map();
 const METRICS = ["joins", "dai", "power", "turbDai", "turbAi", "burnCnt", "burnLgns", "veAi", "fundDai"];
 const STRIDE = 61;
 
@@ -59,12 +61,16 @@ export async function queryTeam(addr, read, meta) {
   const start = rdv.getUint32(roff, true), size = rdv.getUint32(roff + 4, true);
   if (!size) return { ...base, found: false, reason: "该地址没有下级" };
   const lastDfs = start + size; // size 不含自己：子树区间 = (start, start+size]
+  const huge = size > 100000; // 超大团队跳过直推线计算，避免超过 Worker CPU 上限
 
   /* 2.5 父指针 + 直推线：从记录节点往上走到查询地址的第一层下级 */
-  const parentBuf = await read("parent.bin");
-  const par = new Uint32Array(parentBuf);
+  let par = null;
+  if (!huge) {
+    if (PARENT && PARENT_AT === meta.at) par = PARENT;
+    else { const parentBuf = await read("parent.bin"); PARENT = new Uint32Array(parentBuf); PARENT_AT = meta.at; par = PARENT; }
+  }
   const lineCache = new Map();
-  const lineOf = (u) => {
+  const lineOf = huge ? null : (u) => {
     let v = u, guard = 0;
     while (par[v] !== start) {
       const p = par[v];
@@ -94,28 +100,40 @@ export async function queryTeam(addr, read, meta) {
         burnLgns: dv.getFloat32(o + 29, true), veAi: dv.getFloat32(o + 33, true), fundDai: dv.getFloat32(o + 37, true),
       };
       const a = hexAddr(dv, o + 41);
-      if (!lineCache.has(d)) lineCache.set(d, lineOf(d));
+      if (!huge && !lineCache.has(d)) lineCache.set(d, lineOf(d));
       let row = map.get(a);
-      if (!row) map.set(a, row = { a, d0: blank(), d1: blank(), d7: blank(), lineDfs: lineCache.get(d) ?? lineOf(d) });
+      if (!row) map.set(a, row = { a, d0: blank(), d1: blank(), d7: blank(), lineDfs: huge ? -1 : (lineCache.get(d) ?? lineOf(d)) });
       add(row.d7, rec);
       if (day === d0) add(row.d0, rec);
       if (day === d1) add(row.d1, rec);
     }
   }
   const rows = [...map.values()];
-  const lineIds = new Set(rows.map(r => r.lineDfs));
-  const byBlock = new Map();
-  for (const id of lineIds) { const b = id >>> meta.lineaddr.blockShift; let arr = byBlock.get(b); if (!arr) byBlock.set(b, arr = []); arr.push(id); }
-  const lineAddr = new Map();
-  for (const b of byBlock.keys()) {
-    const buf = await get(`lineaddr/${pad4(b)}.bin`);
-    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-    const cnt = dv.getUint32(0, true);
-    for (let k = 0; k < cnt; k++) { const o = 4 + k * 24; lineAddr.set(dv.getUint32(o, true), hexAddr(dv, o + 4)); }
+  if (huge) {
+    for (const r of rows) { r.line = null; delete r.lineDfs; }
+  } else {
+    const lineIds = new Set(rows.map(r => r.lineDfs));
+    const byBlock = new Map();
+    for (const id of lineIds) { const b = id >>> meta.lineaddr.blockShift; let arr = byBlock.get(b); if (!arr) byBlock.set(b, arr = []); arr.push(id); }
+    const lineAddr = new Map();
+    for (const b of byBlock.keys()) {
+      const key = meta.at + ":" + b;
+      let m = LINE_CACHE.get(key);
+      if (!m) {
+        const buf = await get(`lineaddr/${pad4(b)}.bin`);
+        const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+        const cnt = dv.getUint32(0, true);
+        m = new Map();
+        for (let k = 0; k < cnt; k++) { const o = 4 + k * 24; m.set(dv.getUint32(o, true), hexAddr(dv, o + 4)); }
+        if (LINE_CACHE.size < 200) LINE_CACHE.set(key, m);
+      }
+      for (const [k2, v2] of m) lineAddr.set(k2, v2);
+    }
+    for (const r of rows) { r.line = lineAddr.get(r.lineDfs) || null; delete r.lineDfs; }
   }
-  for (const r of rows) { r.line = lineAddr.get(r.lineDfs) || null; delete r.lineDfs; }
+  for (const r of rows) for (const w of ["d0", "d1", "d7"]) { delete r[w].burnCnt; delete r[w].fundDai; delete r[w].turbAi; }
   rows.sort((x, y) => (y.d7.dai - x.d7.dai) || (y.d7.power - x.d7.power) || (y.d7.joins - x.d7.joins));
   const totals = { d0: blank(), d1: blank(), d7: blank() };
   for (const r of rows) { add(totals.d0, r.d0); add(totals.d1, r.d1); add(totals.d7, r.d7); }
-  return { ...base, found: true, totals, rows, count: rows.length, start, size };
+  return { ...base, found: true, totals, rows, count: rows.length, start, size, lineUnavailable: huge };
 }
