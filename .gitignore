@@ -1,5 +1,9 @@
 data/
 site/
 LGNS-Terminal.html
+growth-data/
+tmp/
+node_modules/
+.wrangler/
 *.tmp
 .DS_Store

@@ -121,7 +121,7 @@ function fnv(hex) {
 }
 let refCount = 0;
 for (let i = 0; i < n; i++) if (size[i] > 0) refCount++;
-const SLOT_SHF = Math.max(12, Math.ceil(Math.log2(refCount * 1.6)));
+const SLOT_SHF = Math.max(12, Math.ceil(Math.log2(refCount * 2.5)));
 const SLOTS = 1 << SLOT_SHF, MASK = SLOTS - 1;
 const fp = new Uint32Array(SLOTS), rf = new Uint32Array(SLOTS); // rf = refIndex+1, 0 空
 const refDfs = new Uint32Array(refCount), refSize = new Uint32Array(refCount);

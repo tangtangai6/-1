@@ -38,7 +38,7 @@ export async function queryTeam(addr, read, meta) {
   /* 1. 地址哈希 → ref */
   const h = fnv(addr), MASK = (1 << meta.hash.slotBits) - 1;
   let slot = h & MASK, ref = -1, probes = 0;
-  for (; probes < 64; probes++) {
+  for (; probes < 512; probes++) {
     const c = slot >>> meta.hash.chunkShift;
     const buf = await get(`hash/${pad4(c)}.bin`);
     const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
