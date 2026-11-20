@@ -21,7 +21,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       # 扫链进度存在 GitHub 缓存里（约 115MB 压缩），每次只补新区块
       - name: 读取上次的扫链进度
