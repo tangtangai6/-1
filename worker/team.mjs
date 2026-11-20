@@ -66,6 +66,10 @@ export async function queryTeam(addr, read, meta) {
   const huge = size > (meta.hugeAt ?? 100000); // 超大团队用构建时预存的“大祖先→直推线”条目，不再逐层爬树
 
   if (huge) {
+    try {
+      const obj = JSON.parse(new TextDecoder().decode(await read(`large/${start}.json`)));
+      return { ...obj, addr, found: true, at: obj.at || meta.at, curDay: meta.curDay, days: [meta.windowFrom, meta.curDay], size, count: (obj.rows || []).length, start, tooLarge: false };
+    } catch (e) { }
     let lj = (LARGE_CACHE && LARGE_AT === meta.at) ? LARGE_CACHE : null;
     if (!lj) { lj = JSON.parse(new TextDecoder().decode(await read("large.json"))); LARGE_CACHE = lj; LARGE_AT = meta.at; }
     const item = (lj.items || []).find(x => x.dfs === start);

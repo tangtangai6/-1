@@ -44,13 +44,12 @@ console.log("D:", JSON.stringify(show(rd)));
 const rx = await queryTeam("0x" + "9".repeat(40), read, meta);
 console.log("unknown:", JSON.stringify({ found: rx.found, reason: rx.reason }));
 
-const sum = ra.lineSummary || [];
-const byLine = Object.fromEntries(sum.map(x => [x.line, x.n]));
-const dLine = rd.lineSummary && rd.lineSummary[0] && rd.lineSummary[0].line;
-const lineOk = byLine[B] === 3 && byLine[C] === 2 && dLine === G;
-console.log("huge lineSummary:", JSON.stringify({ B: byLine[B], C: byLine[C], DLine: dLine }));
-const ok = ra.found && ra.count === 0 && ra.rows.length === 0 && Math.abs(ra.totals.d0.dai - 130) < 1e-6 && Math.abs(ra.totals.d0.power - 17) < 1e-6
+const byAddr = Object.fromEntries(ra.rows.map(r => [r.a, r.line]));
+const dLine = rd.rows[0] && rd.rows[0].line;
+const lineOk = byAddr[B] === B && byAddr[C] === C && byAddr[D] === B && byAddr[G] === B && byAddr[E] === C && dLine === G;
+console.log("lines:", JSON.stringify({ B: byAddr[B], C: byAddr[C], D: byAddr[D], G: byAddr[G], E: byAddr[E], DLine: dLine }));
+const ok = ra.found && ra.count === 5 && Math.abs(ra.totals.d0.dai - 130) < 1e-6 && Math.abs(ra.totals.d0.power - 17) < 1e-6
   && Math.abs(ra.totals.d1.turbDai - 50) < 1e-6 && Math.abs(ra.totals.d7.veAi - 20) < 1e-6
-  && rd.found && rd.rows.length === 0 && Math.abs(rd.totals.d0.dai - 30) < 1e-6 && !rx.found && lineOk;
+  && rd.found && rd.count === 1 && Math.abs(rd.totals.d0.dai - 30) < 1e-6 && !rx.found && lineOk;
 console.log(ok ? "TEST PASS" : "TEST FAIL");
 process.exit(ok ? 0 : 1);

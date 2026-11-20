@@ -98,6 +98,7 @@ const pad4 = x => String(x).padStart(4, "0");
 const zeroM = () => ({ joins: 0, dai: 0, power: 0, turbDai: 0, turbAi: 0, burnCnt: 0, burnLgns: 0, veAi: 0, fundDai: 0 });
 const addM = (a, b) => { for (const k in a) a[k] += b[k] || 0; };
 const LS = new Map(); // 大祖先 dfsId → { d0,d1,d7, lines: Map(lineDfs → {s:Set, m}) }
+const ROWSUM = new Map(); // 大祖先 dfsId → Map(地址 → 行)
 for (const [b, arr] of blocks) {
   const buf = Buffer.alloc(4 + arr.length * STRIDE);
   buf.writeUInt32LE(arr.length, 0);
@@ -134,6 +135,11 @@ for (const [b, arr] of blocks) {
         addM(a.d7, m);
         let l = a.lines.get(ln); if (!l) a.lines.set(ln, l = { s: new Set(), m: zeroM() });
         l.s.add(r.a); addM(l.m, m);
+        let rm = ROWSUM.get(p); if (!rm) ROWSUM.set(p, rm = new Map());
+        let row = rm.get(r.a); if (!row) rm.set(r.a, row = { a: r.a, line: addrs[order[ln]], d0: zeroM(), d1: zeroM(), d7: zeroM() });
+        if (r.day === CURDAY) addM(row.d0, m);
+        if (r.day === CURDAY - 1) addM(row.d1, m);
+        addM(row.d7, m);
       }
     }
     buf.writeUInt8(an, o + BASE);
@@ -180,6 +186,23 @@ const largeOut = {
 };
 fs.writeFileSync(path.join(OUT, "large.json"), JSON.stringify(largeOut));
 console.log(`大团队汇总 ${largeOut.items.length} 个节点`);
+
+fs.mkdirSync(path.join(OUT, "large"), { recursive: true });
+const stripM = o => ({ joins: o.joins, dai: o.dai, power: o.power, turbDai: o.turbDai, veAi: o.veAi, burnLgns: o.burnLgns });
+let largeBytes = 0;
+for (const [p, rm] of ROWSUM) {
+  const a = LS.get(p);
+  const rows = [...rm.values()].map(row => ({ a: row.a, line: row.line, d0: stripM(row.d0), d1: stripM(row.d1), d7: stripM(row.d7) }));
+  const item = {
+    dfs: p, at: Date.now(), curDay: CURDAY,
+    totals: { d0: a.d0, d1: a.d1, d7: a.d7 },
+    lineSummary: [...a.lines].map(([ld, l]) => ({ line: addrs[order[ld]], n: l.s.size, m: l.m })),
+    rows,
+  };
+  const str = JSON.stringify(item); largeBytes += str.length;
+  fs.writeFileSync(path.join(OUT, "large", p + ".json"), str);
+}
+console.log(`大团队逐地址明细 ${ROWSUM.size} 个节点 · ${(largeBytes / 1e6).toFixed(1)} MB`);
 for (const k of blocks.keys()) blocks.delete(k);
 
 /* ---- 有伞下的地址 → refs + 哈希表 ---- */
