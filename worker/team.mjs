@@ -131,9 +131,9 @@ export async function queryTeam(addr, read, meta) {
     }
     for (const r of rows) { r.line = lineAddr.get(r.lineDfs) || null; delete r.lineDfs; }
   }
-  for (const r of rows) for (const w of ["d0", "d1", "d7"]) { delete r[w].burnCnt; delete r[w].fundDai; delete r[w].turbAi; }
   rows.sort((x, y) => (y.d7.dai - x.d7.dai) || (y.d7.power - x.d7.power) || (y.d7.joins - x.d7.joins));
   const totals = { d0: blank(), d1: blank(), d7: blank() };
   for (const r of rows) { add(totals.d0, r.d0); add(totals.d1, r.d1); add(totals.d7, r.d7); }
+  for (const r of rows) for (const w of ["d0", "d1", "d7"]) { delete r[w].burnCnt; delete r[w].fundDai; delete r[w].turbAi; }
   return { ...base, found: true, totals, rows, count: rows.length, start, size, lineUnavailable: huge };
 }
