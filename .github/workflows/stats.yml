@@ -18,7 +18,12 @@ jobs:
           restore-keys: lgns-data-
       - name: stats
         run: node --max-old-space-size=6144 tools/stats.js
+      - name: build growth data
+        run: node --max-old-space-size=6144 tools/build-growth.js
       - uses: actions/upload-artifact@v4
         with:
-          name: stats
-          path: stats.json
+          name: growth-data
+          path: |
+            stats.json
+            growth-data
+          retention-days: 2
