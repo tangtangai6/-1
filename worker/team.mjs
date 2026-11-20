@@ -5,6 +5,7 @@
 
 let PARENT = null, PARENT_AT = 0;
 const LINE_CACHE = new Map();
+let LARGE_CACHE = null, LARGE_AT = 0;
 const METRICS = ["joins", "dai", "power", "turbDai", "turbAi", "burnCnt", "burnLgns", "veAi", "fundDai"];
 const BASE = 61;
 
@@ -63,6 +64,33 @@ export async function queryTeam(addr, read, meta) {
   if (!size) return { ...base, found: false, reason: "该地址没有下级" };
   const lastDfs = start + size; // size 不含自己：子树区间 = (start, start+size]
   const huge = size > (meta.hugeAt ?? 100000); // 超大团队用构建时预存的“大祖先→直推线”条目，不再逐层爬树
+
+  if (huge) {
+    let lj = (LARGE_CACHE && LARGE_AT === meta.at) ? LARGE_CACHE : null;
+    if (!lj) { lj = JSON.parse(new TextDecoder().decode(await read("large.json"))); LARGE_CACHE = lj; LARGE_AT = meta.at; }
+    const item = (lj.items || []).find(x => x.dfs === start);
+    if (item) {
+      const ids = new Set((item.lines || []).map(l => l.dfs).filter(id => id >= 0));
+      const byBlock = new Map();
+      for (const id of ids) { const b = id >>> meta.lineaddr.blockShift; let arr = byBlock.get(b); if (!arr) byBlock.set(b, arr = []); arr.push(id); }
+      const lineAddr = new Map();
+      for (const b of byBlock.keys()) {
+        const key = meta.at + ":" + b;
+        let m = LINE_CACHE.get(key);
+        if (!m) {
+          const buf = await get(`lineaddr/${pad4(b)}.bin`);
+          const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+          const cnt = dv.getUint32(0, true);
+          m = new Map();
+          for (let k = 0; k < cnt; k++) { const o = 4 + k * 24; m.set(dv.getUint32(o, true), hexAddr(dv, o + 4)); }
+          if (LINE_CACHE.size < 200) LINE_CACHE.set(key, m);
+        }
+        for (const [k2, v2] of m) lineAddr.set(k2, v2);
+      }
+      const lineSummary = (item.lines || []).map(l => ({ line: lineAddr.get(l.dfs) || null, n: l.n, m: l.m })).sort((a, b) => b.m.dai - a.m.dai);
+      return { ...base, found: true, totals: { d0: item.d0, d1: item.d1, d7: item.d7 }, rows: [], lineSummary, count: 0, start, size, tooLarge: true };
+    }
+  }
 
   /* 2.5 父指针 + 直推线：从记录节点往上走到查询地址的第一层下级 */
   let par = null;

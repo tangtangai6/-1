@@ -95,6 +95,9 @@ for (const r of recs) {
   arr.push(r);
 }
 const pad4 = x => String(x).padStart(4, "0");
+const zeroM = () => ({ joins: 0, dai: 0, power: 0, turbDai: 0, turbAi: 0, burnCnt: 0, burnLgns: 0, veAi: 0, fundDai: 0 });
+const addM = (a, b) => { for (const k in a) a[k] += b[k] || 0; };
+const LS = new Map(); // 大祖先 dfsId → { d0,d1,d7, lines: Map(lineDfs → {s:Set, m}) }
 for (const [b, arr] of blocks) {
   const buf = Buffer.alloc(4 + arr.length * STRIDE);
   buf.writeUInt32LE(arr.length, 0);
@@ -112,12 +115,26 @@ for (const [b, arr] of blocks) {
     buf.writeFloatLE(r.veAi, o + 33);
     buf.writeFloatLE(r.fundDai, o + 37);
     Buffer.from(r.a.slice(2), "hex").copy(buf, o + 41, 0, 20);
-    let an = 0, ao = o + BASE + 1, v = r.d;
+    let an = 0, ao = o + BASE + 1, v = r.d, pairs = [];
     while (true) {
       const p = parentDfs[v];
       if (p === 0xFFFFFFFF) break;
-      if (sizeDfs[p] > LARGE && an < CAP) { buf.writeUInt32LE(p, ao); buf.writeUInt32LE(v, ao + 4); ao += 8; an++; }
+      if (sizeDfs[p] > LARGE && an < CAP) {
+        buf.writeUInt32LE(p, ao); buf.writeUInt32LE(v, ao + 4); ao += 8; an++;
+        pairs.push([p, v]);
+      }
       v = p;
+    }
+    if (pairs.length) {
+      const m = { joins: r.joins, dai: r.dai, power: r.power, turbDai: r.turbDai, turbAi: r.turbAi, burnCnt: r.burnCnt, burnLgns: r.burnLgns, veAi: r.veAi, fundDai: r.fundDai };
+      for (const [p, ln] of pairs) {
+        let a = LS.get(p); if (!a) LS.set(p, a = { d0: zeroM(), d1: zeroM(), d7: zeroM(), lines: new Map() });
+        if (r.day === CURDAY) addM(a.d0, m);
+        if (r.day === CURDAY - 1) addM(a.d1, m);
+        addM(a.d7, m);
+        let l = a.lines.get(ln); if (!l) a.lines.set(ln, l = { s: new Set(), m: zeroM() });
+        l.s.add(r.a); addM(l.m, m);
+      }
     }
     buf.writeUInt8(an, o + BASE);
     o += STRIDE;
@@ -152,6 +169,17 @@ for (const [b, arr] of lineBlocks) {
   fs.writeFileSync(path.join(OUT, "lineaddr", pad4(b) + ".bin"), buf);
 }
 console.log(`父指针 ${(n * 4 / 1e6).toFixed(1)} MB · 直推线地址 ${lineBlocks.size} 个分片`);
+
+const largeOut = {
+  at: Date.now(), curDay: CURDAY, hugeAt: HUGE_AT,
+  items: [...LS].map(([dfsID, a]) => ({
+    dfs: dfsID,
+    d0: a.d0, d1: a.d1, d7: a.d7,
+    lines: [...a.lines].map(([ld, l]) => ({ dfs: ld, n: l.s.size, m: l.m })),
+  })),
+};
+fs.writeFileSync(path.join(OUT, "large.json"), JSON.stringify(largeOut));
+console.log(`大团队汇总 ${largeOut.items.length} 个节点`);
 for (const k of blocks.keys()) blocks.delete(k);
 
 /* ---- 有伞下的地址 → refs + 哈希表 ---- */
