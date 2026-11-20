@@ -895,6 +895,19 @@ ${rows.length > 500 ? `<p class="note">只显示前 500 条，导出 CSV 可拿�
 const TEAM_WIN = [["d0", "今天"], ["d1", "昨天"], ["d7", "近 7 天"]];
 const TEAM_COLS = [["joins", "新加入", 0], ["dai", "入金 DAI", 2], ["power", "新增算力", -1], ["turbDai", "涡轮 DAI", 2], ["veAi", "锁仓 AiLGNS", 4], ["burnLgns", "销毁 LGNS", 0]];
 const TEAM_BUCKETS = [["≥ 1 万", 10000, Infinity], ["5 千 – 1 万", 5000, 10000], ["1 千 – 5 千", 1000, 5000], ["< 1 千", -Infinity, 1000]];
+
+function zeroM() { return { joins: 0, dai: 0, power: 0, turbDai: 0, turbAi: 0, burnCnt: 0, burnLgns: 0, veAi: 0, fundDai: 0 }; }
+function teamLines(rows, w) {
+  const map = new Map();
+  for (const r of rows) {
+    const k = r.line || "";
+    let x = map.get(k);
+    if (!x) map.set(k, x = { a: r.line || null, n: 0, m: zeroM() });
+    x.n++;
+    for (const kk in x.m) x.m[kk] += (r[w][kk] || 0);
+  }
+  return [...map.values()].sort((a, b) => b.m.dai - a.m.dai);
+}
 function teamVal(r, k, d) { return d < 0 ? cp(r[k]) : fmt(r[k], d); }
 async function loadTeam(addr) {
   addr = String(addr || "").toLowerCase();
@@ -920,6 +933,15 @@ function teamCsv() {
   for (const [name, lo, hi] of TEAM_BUCKETS) for (const r of list) { const v = r[w].dai || 0; if (v >= lo && v < hi) out.push([name, r.line, r.a, ...TEAM_COLS.map(([k]) => r[w][k] ?? 0)]); }
   csvDownload(`团队新增_${w}_${d.addr.slice(0, 8)}.csv`, [H, ...out]);
 }
+function teamLineCsv() {
+  const d = Q.team.data; if (!d || !d.rows) return;
+  const w = Q.team.win, q = (Q.team.q || "").trim().toLowerCase();
+  const list = q ? d.rows.filter(r => r.a.includes(q)) : d.rows;
+  const lines = teamLines(list, w);
+  const H = ["直推线", "人数", "入金 DAI", "新加入", "新增算力", "涡轮 DAI", "锁仓 AiLGNS"];
+  csvDownload(`直推线汇总_${w}_${d.addr.slice(0, 8)}.csv`, [H, ...lines.map(l => [l.a || "未知", l.n, +l.m.dai.toFixed(6), l.m.joins, +l.m.power.toFixed(6), +l.m.turbDai.toFixed(6), +l.m.veAi.toFixed(6)])]);
+}
+
 function pageGrowth(arg) {
   if (isAddr(arg) && arg.toLowerCase() !== Q.team.addr) { Q.team.addr = arg.toLowerCase(); Q.team.for = ""; Q.team.data = null; Q.team.err = ""; }
   const head = ph("团队新增业绩", "输入任意地址，看它伞下今天 / 昨天 / 近 7 天的新增，按入金分成 4 个分区。");
@@ -960,10 +982,14 @@ ${kpi("伞下锁仓", fmt(T.veAi, 4), "AiLGNS", `销毁 ${fmt(T.burnLgns, 0)} LG
     return `<div class="card p0 mt"><button class="teamHead" data-bk="${gi}"><span class="tag il">${open ? "▾" : "▸"}</span><b>入金 ${g.name}</b><span class="tag il ml">${fmt(cnt, 0)} 个地址</span><span class="ml">合计 ${fmt(g.sum, 2)} DAI</span><span class="ml" style="color:#8591a5;font-size:12px">${open ? "点击收起" : "点击展开"}</span></button>${open ? `<div class="scroll maxh"><table class="tbl"><thead><tr><th>#</th><th>直推线</th><th>地址</th>${th}</tr></thead><tbody>${tr}</tbody></table></div>${pager}` : ""}</div>`;
   }).join("");
   const anyOpen = Q.team.open.some(Boolean);
+  const lines = teamLines(list, w);
+  const lineDai = lines.reduce((s, l) => s + l.m.dai, 0);
+  const lineTable = `<div class="card mt"><div class="row" style="padding:10px 14px"><b>直推线汇总</b><span class="tag il ml">${fmt(lines.length, 0)} 条线</span><span class="ml">合计 ${fmt(lineDai, 2)} DAI</span><span style="flex:1"></span><button class="btn gh sm" id="teamLineCsv">导出直推线 CSV</button></div><div class="scroll maxh"><table class="tbl"><thead><tr><th>直推线</th><th class="r">人数</th><th class="r">入金 DAI</th><th class="r">新加入</th><th class="r">新增算力</th><th class="r">涡轮 DAI</th><th class="r">锁仓 AiLGNS</th></tr></thead><tbody>${lines.map(l => `<tr><td>${addrLink(l.a)}</td><td class="r">${fmt(l.n, 0)}</td><td class="r"><b>${fmt(l.m.dai, 2)}</b></td><td class="r">${fmt(l.m.joins, 0)}</td><td class="r">${cp(l.m.power)}</td><td class="r">${fmt(l.m.turbDai, 2)}</td><td class="r">${fmt(l.m.veAi, 4)}</td></tr>`).join("") || `<tr><td colspan="7" class="empty">这段时间没有直推线新增</td></tr>`}</tbody></table></div></div>`;
 
   return head + form +
     `<div class="card mt"><div class="row"><b class="mono" style="word-break:break-all">${esc(d.addr)}</b><span class="ml">伞下 ${fmt(d.size, 0)} 人</span><span class="ml">${addrLink(d.addr, "看这个地址 →")}</span></div></div>` + kpis +
     `<div class="card mt"><div class="row"><input id="teamQ" placeholder="按地址搜索" value="${esc(Q.team.q)}" style="max-width:300px"><span class="tag il ml">${fmt(list.length, 0)} 个地址有新增</span><span style="flex:1"></span><button class="btn gh sm" id="teamAll">${anyOpen ? "全部收起" : "全部展开"}</button><button class="btn gh sm" id="teamCsv">导出 CSV</button></div></div>` +
+    lineTable +
     `<div class="note mt">按所选时间段的「入金 DAI」分区；点分区标题展开/收起，展开后每页 50 条。</div>` +
     sections +
     `<p class="note">「新增」按协议日统计，含入金、涡轮、锁仓、销毁与新加入；数字为采集器快照，上方显示更新时间。</p>`;
@@ -1085,6 +1111,7 @@ function bindPage(p) {
   $$("[data-sort]").forEach(h => h.onclick = () => { const k = h.dataset.sort; if (Q.team.sort === k) Q.team.dir *= -1; else { Q.team.sort = k; Q.team.dir = -1; } Q.team.bpage = [0, 0, 0, 0]; render(); });
   const tq = $("#teamQ"); if (tq) tq.oninput = () => { Q.team.q = tq.value; Q.team.bpage = [0, 0, 0, 0]; clearTimeout(tq._t); tq._t = setTimeout(render, 220); };
   const tc = $("#teamCsv"); if (tc) tc.onclick = teamCsv;
+  const tlc = $("#teamLineCsv"); if (tlc) tlc.onclick = teamLineCsv;
   $$("[data-bk]").forEach(b => b.onclick = () => { const i = +b.dataset.bk; Q.team.open[i] = !Q.team.open[i]; render(); });
   $$("[data-bp]").forEach(b => b.onclick = () => { const i = +b.dataset.bp, d = +b.dataset.bd, p = (Q.team.bpage[i] || 0) + d; if (p >= 0) { Q.team.bpage[i] = p; render(); } });
   const ta = $("#teamAll"); if (ta) ta.onclick = () => { const open = !Q.team.open.some(Boolean); Q.team.open = Q.team.open.map(() => open); render(); };
