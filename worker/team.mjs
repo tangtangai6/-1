@@ -60,6 +60,20 @@ export async function queryTeam(addr, read, meta) {
   if (!size) return { ...base, found: false, reason: "该地址没有下级" };
   const lastDfs = start + size; // size 不含自己：子树区间 = (start, start+size]
 
+  /* 2.5 父指针 + 直推线：从记录节点往上走到查询地址的第一层下级 */
+  const parentBuf = await read("parent.bin");
+  const par = new Uint32Array(parentBuf);
+  const lineCache = new Map();
+  const lineOf = (u) => {
+    let v = u, guard = 0;
+    while (par[v] !== start) {
+      const p = par[v];
+      if (p === 0xFFFFFFFF || ++guard > 400) return v;
+      v = p;
+    }
+    return v;
+  };
+
   /* 3. 扫描子树内的记录块 */
   const map = new Map();
   const d0 = meta.curDay, d1 = d0 - 1, d7 = meta.windowFrom;
@@ -80,14 +94,26 @@ export async function queryTeam(addr, read, meta) {
         burnLgns: dv.getFloat32(o + 29, true), veAi: dv.getFloat32(o + 33, true), fundDai: dv.getFloat32(o + 37, true),
       };
       const a = hexAddr(dv, o + 41);
+      if (!lineCache.has(d)) lineCache.set(d, lineOf(d));
       let row = map.get(a);
-      if (!row) map.set(a, row = { a, d0: blank(), d1: blank(), d7: blank() });
+      if (!row) map.set(a, row = { a, d0: blank(), d1: blank(), d7: blank(), lineDfs: lineCache.get(d) ?? lineOf(d) });
       add(row.d7, rec);
       if (day === d0) add(row.d0, rec);
       if (day === d1) add(row.d1, rec);
     }
   }
   const rows = [...map.values()];
+  const lineIds = new Set(rows.map(r => r.lineDfs));
+  const byBlock = new Map();
+  for (const id of lineIds) { const b = id >>> meta.lineaddr.blockShift; let arr = byBlock.get(b); if (!arr) byBlock.set(b, arr = []); arr.push(id); }
+  const lineAddr = new Map();
+  for (const b of byBlock.keys()) {
+    const buf = await get(`lineaddr/${pad4(b)}.bin`);
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    const cnt = dv.getUint32(0, true);
+    for (let k = 0; k < cnt; k++) { const o = 4 + k * 24; lineAddr.set(dv.getUint32(o, true), hexAddr(dv, o + 4)); }
+  }
+  for (const r of rows) { r.line = lineAddr.get(r.lineDfs) || null; delete r.lineDfs; }
   rows.sort((x, y) => (y.d7.dai - x.d7.dai) || (y.d7.power - x.d7.power) || (y.d7.joins - x.d7.joins));
   const totals = { d0: blank(), d1: blank(), d7: blank() };
   for (const r of rows) { add(totals.d0, r.d0); add(totals.d1, r.d1); add(totals.d7, r.d7); }

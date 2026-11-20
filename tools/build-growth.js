@@ -80,7 +80,7 @@ console.log(`记录 ${recs.length.toLocaleString()} 条（其中新加入 ${join
 
 /* ---- 写记录分块（按 dfsId >> 16） ---- */
 fs.rmSync(OUT, { recursive: true, force: true });
-for (const d of ["hash", "refs", "rec"]) fs.mkdirSync(path.join(OUT, d), { recursive: true });
+for (const d of ["hash", "refs", "rec", "lineaddr"]) fs.mkdirSync(path.join(OUT, d), { recursive: true });
 const STRIDE = 61, BLOCK = 1 << 16;
 const blocks = new Map();
 for (const r of recs) {
@@ -111,6 +111,35 @@ for (const [b, arr] of blocks) {
   fs.writeFileSync(path.join(OUT, "rec", pad4(b) + ".bin"), buf);
 }
 const recBlocks = blocks.size, maxBlock = recBlocks ? Math.max(...blocks.keys()) : -1;
+
+/* ---- 父指针 + 直推线地址（供按查询地址回溯所属直推线） ---- */
+const parentDfs = new Uint32Array(n).fill(0xFFFFFFFF);
+for (let i = 0; i < n; i++) if (par[i] >= 0) parentDfs[dfs[i]] = dfs[par[i]];
+const pbuf = Buffer.alloc(n * 4);
+for (let i = 0; i < n; i++) pbuf.writeUInt32LE(parentDfs[i], i * 4);
+fs.writeFileSync(path.join(OUT, "parent.bin"), pbuf);
+
+const lineBlocks = new Map();
+for (let i = 0; i < n; i++) {
+  if (size[i] <= 0) continue;
+  const d = dfs[i], b = d >>> 16;
+  let arr = lineBlocks.get(b); if (!arr) lineBlocks.set(b, arr = []);
+  arr.push([d, addrs[i]]);
+}
+let lineMax = -1;
+for (const [b, arr] of lineBlocks) {
+  if (b > lineMax) lineMax = b;
+  const buf = Buffer.alloc(4 + arr.length * 24);
+  buf.writeUInt32LE(arr.length, 0);
+  let o = 4;
+  for (const [d, a] of arr) {
+    buf.writeUInt32LE(d, o);
+    Buffer.from(a.slice(2), "hex").copy(buf, o + 4, 0, 20);
+    o += 24;
+  }
+  fs.writeFileSync(path.join(OUT, "lineaddr", pad4(b) + ".bin"), buf);
+}
+console.log(`父指针 ${(n * 4 / 1e6).toFixed(1)} MB · 直推线地址 ${lineBlocks.size} 个分片`);
 for (const k of blocks.keys()) blocks.delete(k);
 
 /* ---- 有伞下的地址 → refs + 哈希表 ---- */
@@ -162,6 +191,8 @@ const meta = {
   nodes: n, recordCount: recs.length, refCount,
   hash: { slotBits: SLOT_SHF, chunkShift: CHUNK_SHF, chunks: hashChunks },
   refs: { chunkShift: CHUNK_SHF, chunks: refChunks },
+  parent: { bytes: n * 4 },
+  lineaddr: { blockShift: 16, blocks: lineMax + 1 },
   rec: { blockShift: 16, blocks: maxBlock + 1, stride: STRIDE },
   maxProbe,
 };

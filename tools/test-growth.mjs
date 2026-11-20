@@ -44,8 +44,11 @@ console.log("D:", JSON.stringify(show(rd)));
 const rx = await queryTeam("0x" + "9".repeat(40), read, meta);
 console.log("unknown:", JSON.stringify({ found: rx.found, reason: rx.reason }));
 
+const byAddr = Object.fromEntries(ra.rows.map(r => [r.a, r.line]));
+const lineOk = byAddr[B] === B && byAddr[C] === C && byAddr[D] === B && byAddr[G] === B && byAddr[E] === C;
+console.log("lines:", JSON.stringify({ B: byAddr[B], C: byAddr[C], D: byAddr[D], G: byAddr[G], E: byAddr[E] }));
 const ok = ra.found && ra.count === 5 && Math.abs(ra.totals.d0.dai - 130) < 1e-6 && Math.abs(ra.totals.d0.power - 17) < 1e-6
   && Math.abs(ra.totals.d1.turbDai - 50) < 1e-6 && Math.abs(ra.totals.d7.veAi - 20) < 1e-6
-  && rd.found && rd.count === 1 && Math.abs(rd.totals.d0.dai - 30) < 1e-6 && !rx.found;
+  && rd.found && rd.count === 1 && Math.abs(rd.totals.d0.dai - 30) < 1e-6 && !rx.found && lineOk;
 console.log(ok ? "TEST PASS" : "TEST FAIL");
 process.exit(ok ? 0 : 1);

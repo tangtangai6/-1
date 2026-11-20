@@ -916,8 +916,8 @@ function teamCsv() {
   const w = Q.team.win, q = (Q.team.q || "").trim().toLowerCase();
   let list = q ? d.rows.filter(r => r.a.includes(q)) : d.rows.slice();
   list.sort((a, b) => { const x = a[w][Q.team.sort] || 0, y = b[w][Q.team.sort] || 0; return Q.team.dir > 0 ? x - y : y - x; });
-  const H = ["分区", "地址", ...TEAM_COLS.map(c => c[1])], out = [];
-  for (const [name, lo, hi] of TEAM_BUCKETS) for (const r of list) { const v = r[w].dai || 0; if (v >= lo && v < hi) out.push([name, r.a, ...TEAM_COLS.map(([k]) => r[w][k] ?? 0)]); }
+  const H = ["分区", "直推线", "地址", ...TEAM_COLS.map(c => c[1])], out = [];
+  for (const [name, lo, hi] of TEAM_BUCKETS) for (const r of list) { const v = r[w].dai || 0; if (v >= lo && v < hi) out.push([name, r.line, r.a, ...TEAM_COLS.map(([k]) => r[w][k] ?? 0)]); }
   csvDownload(`团队新增_${w}_${d.addr.slice(0, 8)}.csv`, [H, ...out]);
 }
 function pageGrowth(arg) {
@@ -955,9 +955,9 @@ ${kpi("伞下锁仓", fmt(T.veAi, 4), "AiLGNS", `销毁 ${fmt(T.burnLgns, 0)} LG
     const pages = Math.max(1, Math.ceil(cnt / 50));
     let page = Q.team.bpage[gi] || 0; if (page >= pages) page = pages - 1;
     const shown = g.rows.slice(page * 50, page * 50 + 50);
-    const tr = shown.map((r, i) => `<tr><td>${page * 50 + i + 1}</td><td>${addrLink(r.a)}</td>${TEAM_COLS.map(([k, , dg]) => `<td class="r">${teamVal(r[w], k, dg)}</td>`).join("")}</tr>`).join("") || `<tr><td colspan="8" class="empty">${q ? "没有匹配的地址" : "这个分区没有新增"}</td></tr>`;
+    const tr = shown.map((r, i) => `<tr><td>${page * 50 + i + 1}</td><td>${addrLink(r.line)}</td><td>${addrLink(r.a)}</td>${TEAM_COLS.map(([k, , dg]) => `<td class="r">${teamVal(r[w], k, dg)}</td>`).join("")}</tr>`).join("") || `<tr><td colspan="9" class="empty">${q ? "没有匹配的地址" : "这个分区没有新增"}</td></tr>`;
     const pager = cnt > 50 ? `<div class="row" style="padding:8px 12px"><button class="btn gh sm" data-bp="${gi}" data-bd="-1" ${page <= 0 ? "disabled" : ""}>上一页</button><span class="tag il" style="margin:0 8px">第 ${page + 1} / ${pages} 页</span><button class="btn gh sm" data-bp="${gi}" data-bd="1" ${page >= pages - 1 ? "disabled" : ""}>下一页</button></div>` : "";
-    return `<div class="card p0 mt"><button class="teamHead" data-bk="${gi}"><span class="tag il">${open ? "▾" : "▸"}</span><b>入金 ${g.name}</b><span class="tag il ml">${fmt(cnt, 0)} 个地址</span><span class="ml">合计 ${fmt(g.sum, 2)} DAI</span><span class="ml" style="color:#8591a5;font-size:12px">${open ? "点击收起" : "点击展开"}</span></button>${open ? `<div class="scroll maxh"><table class="tbl"><thead><tr><th>#</th><th>地址</th>${th}</tr></thead><tbody>${tr}</tbody></table></div>${pager}` : ""}</div>`;
+    return `<div class="card p0 mt"><button class="teamHead" data-bk="${gi}"><span class="tag il">${open ? "▾" : "▸"}</span><b>入金 ${g.name}</b><span class="tag il ml">${fmt(cnt, 0)} 个地址</span><span class="ml">合计 ${fmt(g.sum, 2)} DAI</span><span class="ml" style="color:#8591a5;font-size:12px">${open ? "点击收起" : "点击展开"}</span></button>${open ? `<div class="scroll maxh"><table class="tbl"><thead><tr><th>#</th><th>直推线</th><th>地址</th>${th}</tr></thead><tbody>${tr}</tbody></table></div>${pager}` : ""}</div>`;
   }).join("");
   const anyOpen = Q.team.open.some(Boolean);
 
