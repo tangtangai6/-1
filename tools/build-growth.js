@@ -26,7 +26,7 @@ const t0 = Date.now();
 const s = JSON.parse(fs.readFileSync(STATE, "utf8"));
 const n = s.addrs.length, par = s.par, addrs = s.addrs, ts = s.ts, flag = s.flag, day1 = s.day1;
 const NF = 8, WINDOW = 7, FROM = Math.max(1, CURDAY - WINDOW + 1);
-const LARGE = +opt("large", 10000), CAP = 8, HUGE_AT = +opt("huge", 100000);
+const HUGE_AT = +opt("huge", 100000), LARGE = +opt("large", HUGE_AT), CAP = 6;
 const BASE = 61, STRIDE = BASE + 1 + CAP * 8;
 const dayOf = t => (t < day1 ? 0 : Math.floor((t - day1) / 86400) + 1);
 console.log(`节点 ${n.toLocaleString()} · 当前第 ${CURDAY} 天 · 窗口 ${FROM}-${CURDAY}`);
