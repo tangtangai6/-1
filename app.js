@@ -687,6 +687,28 @@ async function loadAddr(a, lim) {
   if (route().p === "address") render();
   if (!lim && Q.eligAddr.toLowerCase() !== a.toLowerCase()) checkElig(a, false);
 }
+
+function levelProgress(l) {
+  if (!l) return "";
+  const th = (D.lv && D.lv.thresholds) || (D.lvl && D.lvl.thresholds) || [];
+  const cur = N(l.level) || 0;
+  const next = th.find(t => N(t.level) === cur + 1);
+  const ve = N(l.veUsd) || 0;
+  const zs = (l.zones || []).map(z => N(z) || 0);
+  if (!next) return `<div class="card mt"><div class="row"><b>等级进度</b><span class="pill ok ml">P${cur}</span><span class="ml">已达最高等级</span></div></div>`;
+  const veReq = N(next.veUsd) || 0, veGap = Math.max(0, veReq - ve);
+  const zr = next.zoneUsd != null ? N(next.zoneUsd) : null;
+  const zMet = zr ? zs.filter(z => z >= zr).length : null;
+  const rows = [];
+  rows.push(`<tr><td>锁仓价值</td><td class="r">$${fmt(ve, 0)}</td><td class="r">$${fmt(veReq, 0)}</td><td class="r ${veGap > 0 ? "dn" : "up"}">${veGap > 0 ? `差 $${fmt(veGap, 0)}` : "已达标"}</td></tr>`);
+  ["大区", "二区", "三区"].forEach((n, i) => {
+    const z = zs[i] || 0, g = zr ? Math.max(0, zr - z) : null;
+    rows.push(`<tr><td>${n}</td><td class="r">$${fmt(z, 0)}</td><td class="r">${zr ? `$${fmt(zr, 0)}` : "—"}</td><td class="r ${zr && g > 0 ? "dn" : "up"}">${zr ? (g > 0 ? `差 $${fmt(g, 0)}` : "已达标") : "—"}</td></tr>`);
+  });
+  if (next.contains != null) rows.push(`<tr><td>伞下 P${next.contains}</td><td class="r">—</td><td class="r">需 ${next.contains} 个</td><td class="r">官网未返回当前数量</td></tr>`);
+  return `<div class="card mt"><div class="row"><b>等级进度</b><span class="tag il ml">P${cur} → P${next.level}</span><span class="ml">${zr ? `三区达标 ${zMet}/3` : "按锁仓与伞下等级"}</span></div><table class="tbl mt"><thead><tr><th>要求</th><th class="r">当前</th><th class="r">下一级门槛</th><th class="r">还差</th></tr></thead><tbody>${rows.join("")}</tbody></table><p class="note">门槛来自官方 /level；等级按「锁仓价值 + 三个大区业绩（每区都要达标）+ 伞下高等级人数」综合判定。</p></div>`;
+}
+
 function addrView(x) {
   if (x.loading) return `<div class="card mt"><div class="sk" style="height:120px"></div></div>`;
   if (x.error) return `<div class="verdict no">地址格式不对</div>`;
@@ -710,7 +732,7 @@ ${sec("算力")}
 </div>
 ${x.p && x.p.records && x.p.records.length ? `<details class="fold"><summary>算力记录（${x.p.records.length} 条）</summary><div class="card p0 scroll maxh"><table class="tbl"><thead><tr><th>时间（北京）</th><th>类型</th><th class="r">数量</th><th class="r">算力</th><th>状态</th><th>交易</th></tr></thead><tbody>${x.p.records.map(r => `<tr><td class="mono">${bj(r.ts)}</td><td>${esc(MN[r.method] || r.method)}</td><td class="r">${r.daiAmount ? fmt(N(r.daiAmount), 2) + " DAI" : r.lgnsAmount ? fmt(N(r.lgnsAmount), 0) + " LGNS" : r.ailgnsAmount ? fmt(N(r.ailgnsAmount), 4) + " AiLGNS" : "—"}</td><td class="r">${fmt(N(r.power), 2)}</td><td>${r.status === "active" ? `<span class="pill ok">生效</span>` : r.status === "queued" ? `<span class="pill wn">排队</span>` : esc(r.status || "")}</td><td>${r.tx ? exLink("tx/" + r.tx, "↗") : ""}</td></tr>`).join("")}</tbody></table></div></details>` : ""}
 ${sec("团队与等级")}
-${c ? `<div class="grid g4">${kpi("团队人数", fmt(c.team, 0), "人", "", info("这个地址伞下所有层级成员总数。", "/community/{地址}"), "hl")}${kpi("直推人数", fmt(c.direct, 0), "人", "", info("直接推荐的人数。", "/community/{地址}"))}${kpi("团队有效算力", cp(N(c.teamActivePower)), "Power", "", info("整个团队现在有效的算力。", "/community/{地址}"))}${kpi("等级", l ? (l.level ? "P" + l.level : "无等级") : "—", "", l ? `治理锁仓 $${fmt(N(l.veUsd), 2)}${l.reason === "ve_below_p1" ? " · 锁仓未达 P1 门槛" : l.reason ? " · " + esc(l.reason) : ""}` : "", info("锁仓价值（美元）和对应等级。", "/level/{地址}"), "or")}</div>
+${c ? `<div class="grid g4">${kpi("团队人数", fmt(c.team, 0), "人", "", info("这个地址伞下所有层级成员总数。", "/community/{地址}"), "hl")}${kpi("直推人数", fmt(c.direct, 0), "人", "", info("直接推荐的人数。", "/community/{地址}"))}${kpi("团队有效算力", cp(N(c.teamActivePower)), "Power", "", info("整个团队现在有效的算力。", "/community/{地址}"))}${kpi("等级", l ? (l.level ? "P" + l.level : "无等级") : "—", "", l ? `治理锁仓 $${fmt(N(l.veUsd), 2)}${l.reason === "ve_below_p1" ? " · 锁仓未达 P1 门槛" : l.reason ? " · " + esc(l.reason) : ""}` : "", info("锁仓价值（美元）和对应等级。", "/level/{地址}"), "or")}</div>${levelProgress(l)}
 <p class="note">上级：${c.referrer ? addrLink(c.referrer, c.referrer) : "—"} · 社区层级 ${fmt(c.level, 0)}</p>
 <details class="fold"><summary>直推明细（${(c.directs || []).length} 人，按有效算力排序）</summary><div class="card p0 scroll maxh"><table class="tbl"><thead><tr><th>#</th><th>地址</th><th class="r">有效算力</th><th>绑定时间</th></tr></thead><tbody>${(c.directs || []).slice().sort((p, q) => N(q.activePower) - N(p.activePower)).map((d, i) => `<tr><td>${i + 1}</td><td>${addrLink(d.address)}</td><td class="r">${cp(N(d.activePower))}</td><td class="mono">${d.boundAt ? bj(d.boundAt, false) : "—"}</td></tr>`).join("") || `<tr><td colspan="4" class="empty">没有直推</td></tr>`}</tbody></table></div></details>` : empty("官网没有这个地址的社区数据")}
 ${sec("排放与领取")}
