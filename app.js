@@ -99,7 +99,7 @@ const call = (to, sel, ...args) => ({ to, data: SEL[sel] + args.map(a => typeof 
 
 /* ================= 数据层 ================= */
 const D = { at: 0, health: {} };
-const Q = { burnDay: 0, burners: {}, elig: null, eligAddr: "", addr: null, addrQ: "", holders: [], holdersNext: null, holdersBusy: false, rank: "day", rankData: {}, kline: "1h", klineData: {}, burnSearch: "", calc: {}, perms: null, permsBusy: false, actOff: 0 };
+const Q = { burnDay: 0, burners: {}, elig: null, eligAddr: "", addr: null, addrQ: "", holders: [], holdersNext: null, holdersBusy: false, rank: "day", rankData: {}, kline: "1h", klineData: {}, burnSearch: "", calc: {}, perms: null, permsBusy: false, actOff: 0, team: { addr: "", for: "", win: "d7", data: null, loading: false, err: "", q: "", sort: "dai", dir: -1, limit: 100 } };
 const HN = { ov: "官方 /overview", feed: "官方 /overview/feed", pw: "官方 /power", em: "官方 /emission", pr: "官方 /protocol", ve: "官方 /ve", pools: "官方 /pools", tb: "官方 /turbine", pol: "官方 /pol", lv: "官方 /level", price: "官方 /price", ga: "官方 /gauge", k1: "官方 /kline", ch: "Anubis 链 RPC", hc: "Blockscout", my: "本地采集器" };
 async function safe(name, fn) { const t = Date.now(); try { const v = await fn(); D.health[name] = { ok: true, ms: Date.now() - t }; return v; } catch (e) { D.health[name] = { ok: false, ms: Date.now() - t, err: String(e.message || e) }; return null; } }
 
@@ -724,7 +724,7 @@ ${sec("500 LGNS 销毁资格")}
 <div class="card">${Q.elig && Q.elig.addr && Q.elig.addr.toLowerCase() === x.a.toLowerCase() ? eligView(Q.elig) : `<div class="empty">正在读取…</div>`}</div>
 ${sec("链上活动", x.act ? `共 ${fmt(x.act.total, 0)} 条` : "")}
 ${x.act && x.act.rows && x.act.rows.length ? `<div class="card p0 scroll maxh"><table class="tbl"><thead><tr><th>时间（北京）</th><th>模块</th><th>动作</th><th class="r">数量</th><th>交易</th></tr></thead><tbody>${x.act.rows.map(r => `<tr><td class="mono">${bj(r.ts)}</td><td>${esc(r.module)}</td><td>${esc(MN[r.method] || r.method)}</td><td class="r">${fmt(N(r.amount), 6)}</td><td>${exLink("tx/" + r.tx, "↗")}</td></tr>`).join("")}</tbody></table></div>${x.act.total > x.act.rows.length ? `<div style="text-align:center;margin-top:8px"><button class="btn gh" data-act-more>再加载 40 条</button></div>` : ""}` : empty("暂无活动记录")}
-${sec("团队新增业绩")}<div class="card"><p class="note" style="margin:0">伞下逐层、逐直推线的新增入金 / 涡轮 / 锁仓：<a href="#/growth/${x.a}">打开「团队新增业绩」查这个地址 →</a>（需要本地采集器）</p></div>`;
+${sec("团队新增业绩")}<div class="card"><p class="note" style="margin:0">伞下逐层、逐直推线的新增入金 / 涡轮 / 锁仓：<a href="#/growth/${x.a}">打开「团队新增业绩」查这个地址 →</a>（实时查询）</p></div>`;
 }
 function watchSection() {
   const list = watchGet();
@@ -891,49 +891,61 @@ ${rows.length > 500 ? `<p class="note">只显示前 500 条，导出 CSV 可拿�
 <p class="note">「接近 P1」= 锁仓价值 ≥ $500 但还没有等级的地址（按锁仓价值排序，最多 300 个）。团队人数来自采集器推荐树；锁仓价值、自身算力、三区业绩来自官方 /level/{地址}。</p></div>`;
 }
 
-const GP = [["d0", "今天"], ["d1", "昨天"], ["d7", "近 7 天"], ["d30", "近 30 天"], ["all", "创世至今"]];
-function gRange() { const cd = EMB ? EMB.curDay : (D.ch && D.ch.day) || (D.cm && D.cm.curDay) || 0, k = Q.gP || "d7"; return k === "d0" ? [cd, cd] : k === "d1" ? [cd - 1, cd - 1] : k === "d7" ? [Math.max(0, cd - 6), cd] : k === "d30" ? [Math.max(0, cd - 29), cd] : [0, cd]; }
-async function loadGrowth() {
-  const a = Q.gAddr; if (!isAddr(a || "")) return;
-  const [f, t] = gRange(), dep = EMB ? 10 : (Q.gDepth || 10), key = [a.toLowerCase(), f, t, dep].join("|");
-  if (Q.g && Q.g.key === key) return; // 同一个查询只发一次（失败后重新点「查询」会清掉再查）
-  if (EMB) { const e = EMB.growth && EMB.growth[a.toLowerCase()], r = e && e[Q.gP || "d7"]; Q.g = r ? { key, ...r } : { key, error: "noembed" }; setTimeout(() => { if (route().p === "growth") render(); }, 0); return; }
-  Q.g = { key, loading: true }; if (route().p === "growth") render();
-  try { const j = await getJ(`./api/growth?addr=${a}&from=${Math.max(0, f)}&to=${t}&depth=${dep}`, 60000); Q.g = { key, ...j }; }
-  catch (e) { Q.g = { key, error: "net", msg: String(e.message || e) }; }
+/* ================= 团队新增业绩（Worker API） ================= */
+const TEAM_WIN = [["d0", "今天"], ["d1", "昨天"], ["d7", "近 7 天"]];
+const TEAM_COLS = [["joins", "新加入", 0], ["dai", "入金 DAI", 2], ["power", "新增算力", -1], ["turbDai", "涡轮 DAI", 2], ["veAi", "锁仓 AiLGNS", 4], ["burnLgns", "销毁 LGNS", 0]];
+function teamVal(r, k, d) { return d < 0 ? cp(r[k]) : fmt(r[k], d); }
+async function loadTeam(addr) {
+  addr = String(addr || "").toLowerCase();
+  if (!isAddr(addr)) return;
+  Q.team.addr = addr; Q.team.for = ""; Q.team.data = null; Q.team.loading = true; Q.team.err = ""; Q.team.limit = 100;
+  if (route().p === "growth") render();
+  try {
+    const r = await fetch(`/api/team?addr=${addr}`, { credentials: "same-origin", headers: { accept: "application/json" } });
+    if (r.status === 401) { location.href = "/login"; return; }
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+    Q.team.data = j; Q.team.for = addr;
+  } catch (e) { Q.team.err = String((e && e.message) || e); }
+  Q.team.loading = false;
   if (route().p === "growth") render();
 }
+function teamCsv() {
+  const d = Q.team.data; if (!d || !d.rows) return;
+  const w = Q.team.win, H = ["地址", ...TEAM_COLS.map(c => c[1])];
+  csvDownload(`团队新增_${w}_${d.addr.slice(0, 8)}.csv`, [H, ...d.rows.map(r => [r.a, ...TEAM_COLS.map(([k]) => r[w][k] ?? 0)])]);
+}
 function pageGrowth(arg) {
-  if (isAddr(arg) && arg.toLowerCase() !== String(Q.gAddr || "").toLowerCase()) Q.gAddr = arg;
-  const head = ph("团队新增业绩", "输入团队长地址，看伞下每一层、每条直推线在所选时间段内的新增人数、入金、涡轮、锁仓。"), [f0, t0] = gRange();
-  const form = `<div class="card"><form class="form" id="gForm"><input id="gIn" placeholder="输入团队长 0x 地址" value="${esc(Q.gAddr || "")}" autocomplete="off" spellcheck="false"><select id="gDepth" style="flex:none;width:140px" ${EMB ? "disabled title=\"快照版固定展开 10 层\"" : ""}>${[3, 5, 10, 20, 50].map(d => `<option value="${d}" ${(EMB ? 10 : (Q.gDepth || 10)) === d ? "selected" : ""}>逐层展开 ${d} 层</option>`).join("")}</select><button class="btn">查询</button></form>
-<div class="row mt"><div class="seg" id="gSeg">${GP.map(([k, n]) => `<button data-gp="${k}" class="${(Q.gP || "d7") === k ? "on" : ""}">${n}</button>`).join("")}</div><span class="tag il ml">${f0 === t0 ? `协议第 ${t0} 天` : `协议第 ${Math.max(0, f0)} – ${t0} 天`} · 北京时间 0 点切日</span></div></div>`;
-  if (!EMB && (!HTTP || !D.st || !D.st.ready)) return head + form + `<div class="mt">${localBox("团队新增业绩")}</div>`;
-  const g = Q.g;
-  const embList = () => EMB && EMB.growthIndex ? `${sec("可直接查看的重点地址", `${EMB.growthIndex.length} 个 · 快照 ${bj(Math.floor(EMB.at / 1000))}`)}<div class="card p0 scroll maxh"><table class="tbl"><thead><tr><th>#</th><th>地址</th><th>等级</th><th>入选原因</th><th class="r">团队人数</th><th class="r">直推</th><th class="r">近 7 天伞下入金</th><th></th></tr></thead><tbody>${EMB.growthIndex.map((r, i) => `<tr><td>${i + 1}</td><td>${addrLink(r.a)}</td><td>${lvPill(r.level)}</td><td><span class="tag il">${esc(r.why)}</span></td><td class="r">${fmt(r.team, 0)}</td><td class="r">${fmt(r.direct, 0)}</td><td class="r">${fmt(r.dai7, 0)}</td><td><a href="#/growth/${r.a}">业绩 →</a></td></tr>`).join("")}</tbody></table></div>` : "";
-  if (!isAddr(Q.gAddr || "")) return head + form + (EMB ? embList() : `<div class="card mt"><p class="note">从「社区增长」团队榜点「业绩 →」，或粘贴任意地址查询。伞下几十万人的大团队也只要几秒（采集器在本机计算）。</p></div>`);
-  if (!g || g.loading) return head + form + `<div class="card mt"><div class="empty">正在计算伞下业绩…</div></div>`;
-  if (g.error === "noembed") return head + form + `<div class="verdict wn">这个地址不在快照版预先算好的名单里。快照版只存了下面这些重点地址（P2 及以上、近 7 天入金 / 拉新 / 新增排行靠前的团队）；要查任意地址，需要在电脑上运行采集器。</div>` + embList();
-  if (g.error) return head + form + `<div class="verdict no">${g.error === "notfound" ? "这个地址没有绑定推荐关系（不在 Community 合约里）" : g.error === "badaddr" ? "地址格式不对" : g.error === "notready" ? "采集器还在扫链，稍后再试" : "查询失败：" + esc(g.msg || g.error)}</div>`;
-  const T = g.total, me = g.self, lvr = D.lvl && D.lvl.rows.find(x => x.a === g.addr);
-  const cols = `<th class="r">新加入</th><th class="r">入金 DAI</th><th class="r">新增算力</th><th class="r">涡轮 DAI</th><th class="r">新锁仓 AiLGNS</th><th class="r">LGNS 销毁</th>`;
-  const cells = r => `<td class="r">${fmt(r.joins, 0)}</td><td class="r"><b>${fmt(r.dai, 2)}</b></td><td class="r">${cp(r.power)}</td><td class="r">${fmt(r.turbDai, 2)}</td><td class="r">${fmt(r.veAi, 4)}</td><td class="r">${fmt(r.burnCnt, 0)}</td>`;
-  return head + form + `<div class="card mt"><div class="row"><b class="mono" style="word-break:break-all">${esc(g.addr)}</b>${lvr ? lvPill(lvr.level) : ""}<span class="ml">${addrLink(g.addr, "查这个地址 →")}</span></div><p class="note" style="margin-top:4px">团队 ${fmt(g.team, 0)} 人 · 直推 ${fmt(g.direct, 0)} 人 · 位于第 ${fmt(g.depth, 0)} 层（从合约根地址起算，官网层数口径可能不同） · 上级 ${g.ref ? `<a href="#/growth/${g.ref}">${short(g.ref)}</a>` : "—"} · 数据截至区块 ${fmt(g.block, 0)}</p></div>
-<div class="grid g4 mt">
- ${kpi("伞下新加入", fmt(T.joins, 0), "人", `团队共 ${fmt(T.members, 0)} 人`, info("所选时间段内伞下新绑定推荐关系的人数（不含迁移导入）。", "Community Joined 事件"), "hl")}
- ${kpi("伞下入金", fmt(T.dai, 2), "DAI", `新增算力 ${cp(T.power)}`, info("所选时间段内伞下所有人用 DAI 参与算力的合计。新增算力还含 LGNS 销毁换的算力。", "PowerDaiQueued + PowerBurnQueued 事件"), "gr")}
- ${kpi("伞下涡轮花费", fmt(T.turbDai, 2), "DAI", `激活 ${fmt(T.turbAi, 4)} AiLGNS`, info("所选时间段内伞下激活涡轮花的 DAI。", "Turbine 激活事件"), "or")}
- ${kpi("伞下新锁仓", fmt(T.veAi, 4), "AiLGNS", `LGNS 销毁 ${fmt(T.burnCnt, 0)} 笔`, info("所选时间段内伞下新建治理锁仓与永久治理销毁合计。", "VePositionCreated + PermanentBurned 事件"))}
-</div>
-<p class="note">本人同期：入金 ${fmt(me.dai, 2)} DAI · 涡轮 ${fmt(me.turbDai, 2)} DAI · 锁仓 ${fmt(me.veAi, 4)} AiLGNS（不计入伞下）。${T.fundDai ? `伞下创世共建导入 ${fmt(T.fundDai, 0)} DAI 单列，不算新增入金。` : ""}</p>
-${sec("按层", "第 1 层 = 直推", `<button class="btn gh sm" data-csv="layers">导出 CSV</button>`)}
-<div class="card p0 scroll"><table class="tbl"><thead><tr><th>层</th><th class="r">团队人数</th>${cols}</tr></thead><tbody>${g.layers.map(r => `<tr><td>${r.deeper ? `第 ${g.maxDepth + 1} 层及以下` : `第 ${r.layer} 层`}</td><td class="r">${fmt(r.members, 0)}</td>${cells(r)}</tr>`).join("")}<tr class="tot"><td>合计</td><td class="r">${fmt(T.members, 0)}</td>${cells(T)}</tr></tbody></table></div>
-${sec("按直推线", `${fmt(g.linesTotal || g.lines.length, 0)} 条线，按入金排序${g.linesTotal > g.lines.length ? `（快照版只存前 ${g.lines.length} 条）` : ""}`, `<button class="btn gh sm" data-csv="lines">导出 CSV</button>`)}
-<div class="card p0 scroll maxh"><table class="tbl"><thead><tr><th>#</th><th>直推地址</th><th class="r">线上人数</th>${cols}<th></th></tr></thead><tbody>${g.lines.slice(0, 300).map((r, i) => `<tr><td>${i + 1}</td><td>${addrLink(r.a)}</td><td class="r">${fmt(r.members, 0)}</td>${cells(r)}<td><a href="#/growth/${r.a}">下钻 →</a></td></tr>`).join("") || `<tr><td colspan="10" class="empty">没有直推</td></tr>`}</tbody></table></div>
-${sec("伞下贡献最多", `按入金排序，前 ${g.top.length}`)}
-<div class="card p0 scroll maxh"><table class="tbl"><thead><tr><th>#</th><th>地址</th><th class="r">层</th><th>所属直推线</th>${cols}</tr></thead><tbody>${g.top.map((r, i) => `<tr><td>${i + 1}</td><td>${addrLink(r.a)}</td><td class="r">${r.layer}</td><td>${addrLink(r.line)}</td>${cells(r)}</tr>`).join("") || `<tr><td colspan="10" class="empty">这段时间伞下没有入金 / 涡轮 / 锁仓</td></tr>`}</tbody></table></div>
-${sec("新加入成员", `最近 ${g.newMembers.length} 个`)}
-<div class="card p0 scroll maxh"><table class="tbl"><thead><tr><th>时间（北京）</th><th>地址</th><th class="r">层</th><th>推荐人</th></tr></thead><tbody>${g.newMembers.map(r => `<tr><td class="mono">${bj(r.ts)}</td><td>${addrLink(r.a)}</td><td class="r">${r.layer}</td><td>${addrLink(r.ref)}</td></tr>`).join("") || `<tr><td colspan="4" class="empty">这段时间没有新人加入</td></tr>`}</tbody></table></div>`;
+  if (isAddr(arg) && arg.toLowerCase() !== Q.team.addr) { Q.team.addr = arg.toLowerCase(); Q.team.for = ""; Q.team.data = null; Q.team.err = ""; }
+  const head = ph("团队新增业绩", "输入任意地址，看它伞下今天 / 昨天 / 近 7 天的新增，逐地址明细。");
+  const form = `<div class="card"><form class="form" id="teamForm"><input id="teamIn" placeholder="输入 0x 团队长地址" value="${esc(Q.team.addr)}" autocomplete="off" spellcheck="false"><button class="btn">查询</button></form>
+<div class="row mt"><div class="seg" id="teamSeg">${TEAM_WIN.map(([k, n]) => `<button data-tw="${k}" class="${Q.team.win === k ? "on" : ""}">${n}</button>`).join("")}</div><span class="tag il ml">${Q.team.data ? `协议第 ${Q.team.data.curDay} 天 · 更新于 ${ago(Q.team.data.at || Date.now())}` : "每 4 小时更新"}</span></div></div>`;
+  if (!Q.team.addr) return head + form + `<div class="card mt"><p class="note" style="margin:0">粘贴任意地址查询。只列出这段时间有新增的地址，可按任意列排序、按地址搜索、导出 CSV。</p></div>`;
+  if (Q.team.loading) return head + form + `<div class="card mt"><div class="empty">正在查询伞下新增…</div></div>`;
+  if (Q.team.err) return head + form + `<div class="verdict no">查询失败：${esc(Q.team.err)}</div>`;
+  const d = Q.team.data;
+  if (!d) return head + form;
+  if (!d.found) return head + form + `<div class="verdict wn">${esc(d.reason || "这个地址近 7 天没有伞下记录")}</div>`;
+  const w = Q.team.win, T = d.totals[w] || {};
+  const kpis = `<div class="grid g4 mt">
+${kpi("伞下新加入", fmt(T.joins, 0), "人", `伞下共 ${fmt(d.size, 0)} 人`, info("所选时间段内伞下新绑定推荐关系的人数（不含迁移导入）。", "Community Joined 事件"), "hl")}
+${kpi("伞下入金", fmt(T.dai, 2), "DAI", `新增算力 ${cp(T.power)}`, info("所选时间段内伞下所有人用 DAI 参与算力的合计。", "PowerDaiQueued 事件"), "gr")}
+${kpi("伞下涡轮", fmt(T.turbDai, 2), "DAI", `激活 ${fmt(T.turbAi, 4)} AiLGNS`, info("所选时间段内伞下激活涡轮花的 DAI。", "Turbine 激活事件"), "or")}
+${kpi("伞下锁仓", fmt(T.veAi, 4), "AiLGNS", `销毁 ${fmt(T.burnLgns, 0)} LGNS · ${fmt(T.burnCnt, 0)} 笔`, info("所选时间段内伞下新建治理锁仓与永久治理销毁。", "VePositionCreated + PermanentBurned 事件"))}
+</div>`;
+  const q = (Q.team.q || "").trim().toLowerCase();
+  let list = q ? d.rows.filter(r => r.a.includes(q)) : d.rows.slice();
+  const key = Q.team.sort, dir = Q.team.dir;
+  list.sort((a, b) => { const x = a[w][key] || 0, y = b[w][key] || 0; return dir > 0 ? x - y : y - x; });
+  const shown = list.slice(0, Q.team.limit);
+  const th = TEAM_COLS.map(([k, n]) => `<th class="r" data-sort="${k}" style="cursor:pointer;white-space:nowrap">${n}${Q.team.sort === k ? (Q.team.dir < 0 ? " ↓" : " ↑") : ""}</th>`).join("");
+  const tr = shown.map((r, i) => `<tr><td>${i + 1}</td><td>${addrLink(r.a)}</td>${TEAM_COLS.map(([k, , dg]) => `<td class="r">${teamVal(r[w], k, dg)}</td>`).join("")}</tr>`).join("");
+  return head + form +
+    `<div class="card mt"><div class="row"><b class="mono" style="word-break:break-all">${esc(d.addr)}</b><span class="ml">伞下 ${fmt(d.size, 0)} 人</span><span class="ml">${addrLink(d.addr, "看这个地址 →")}</span></div></div>` + kpis +
+    `<div class="card mt"><div class="row"><input id="teamQ" placeholder="按地址搜索" value="${esc(Q.team.q)}" style="max-width:300px"><span class="tag il ml">${fmt(list.length, 0)} 个地址有新增</span><span style="flex:1"></span><button class="btn gh sm" id="teamCsv">导出 CSV</button></div></div>` +
+    `<div class="card p0 scroll maxh"><table class="tbl"><thead><tr><th>#</th><th>地址</th>${th}</tr></thead><tbody>${tr || `<tr><td colspan="8" class="empty">${q ? "没有匹配的地址" : "这个时间段没有新增"}</td></tr>`}</tbody></table></div>` +
+    (list.length > shown.length ? `<div class="mt"><button class="btn gh" id="teamMore">显示更多（剩余 ${fmt(list.length - shown.length, 0)} 个）</button></div>` : "") +
+    `<p class="note">「新增」按协议日统计，含入金、涡轮、锁仓、销毁与新加入；数字为采集器快照，上方显示更新时间。</p>`;
 }
 
 function pageChanges() {
@@ -1011,7 +1023,7 @@ function render() {
   if (p === "elig") loadBurners(Q.burnDay);
   if (p === "holders" && !Q.holders.length && !Q.holdersBusy) loadHolders(false);
   if (p === "about" && !Q.perms && !Q.permsBusy) loadPerms();
-  if (p === "growth" && (EMB || (HTTP && D.st && D.st.ready)) && isAddr(Q.gAddr || "")) loadGrowth();
+  if (p === "growth" && isAddr(Q.team.addr) && Q.team.for !== Q.team.addr && !Q.team.loading) loadTeam(Q.team.addr);
 }
 let lastTouch = 0, pending = false;
 ["scroll", "touchmove", "wheel", "pointerdown", "keydown"].forEach(t => window.addEventListener(t, () => lastTouch = Date.now(), { passive: true, capture: true }));
@@ -1047,9 +1059,12 @@ function bindPage(p) {
   $$("#cmSeg [data-cm]").forEach(b => b.onclick = () => { Q.cmTab = b.dataset.cm; render(); });
   $$("#lvSeg [data-lv]").forEach(b => b.onclick = () => { Q.lvTab = b.dataset.lv; render(); });
   const lq = $("#lvQ"); if (lq) lq.oninput = () => { Q.lvQ = lq.value; clearTimeout(lq._t); lq._t = setTimeout(render, 250); };
-  $$("#gSeg [data-gp]").forEach(b => b.onclick = () => { Q.gP = b.dataset.gp; render(); });
-  const gd = $("#gDepth"); if (gd) gd.onchange = () => { Q.gDepth = +gd.value; gd.blur(); render(); };
-  const gf = $("#gForm"); if (gf) gf.onsubmit = e => { e.preventDefault(); const v = $("#gIn").value.trim(); if (!isAddr(v)) return $("#gIn").classList.add("err"); Q.gAddr = v; Q.g = null; $("#gIn").blur(); if (location.hash !== "#/growth/" + v) location.hash = "#/growth/" + v; else render(); };
+  const tf = $("#teamForm"); if (tf) tf.onsubmit = e => { e.preventDefault(); const v = $("#teamIn").value.trim().toLowerCase(); if (!isAddr(v)) return $("#teamIn").classList.add("err"); if (location.hash !== "#/growth/" + v) location.hash = "#/growth/" + v; else loadTeam(v); };
+  $$("#teamSeg [data-tw]").forEach(b => b.onclick = () => { Q.team.win = b.dataset.tw; render(); });
+  $$("[data-sort]").forEach(h => h.onclick = () => { const k = h.dataset.sort; if (Q.team.sort === k) Q.team.dir *= -1; else { Q.team.sort = k; Q.team.dir = -1; } render(); });
+  const tq = $("#teamQ"); if (tq) tq.oninput = () => { Q.team.q = tq.value; clearTimeout(tq._t); tq._t = setTimeout(render, 220); };
+  const tc = $("#teamCsv"); if (tc) tc.onclick = teamCsv;
+  const tm = $("#teamMore"); if (tm) tm.onclick = () => { Q.team.limit += 200; render(); };
   $$("#chgSeg [data-chg]").forEach(b => b.onclick = () => { Q.chgK = b.dataset.chg; render(); });
   $$("[data-csv]").forEach(b => b.onclick = () => exportCsv(b.dataset.csv));
   if (p === "calc") { $$("#page input,#page select").forEach(i => { i.oninput = calcRun; i.onchange = calcRun; }); calcRun(); }

@@ -48,7 +48,7 @@ export async function queryTeam(addr, read, meta) {
     if (fp === h) { ref = r - 1; break; }
     slot = (slot + 1) & MASK;
   }
-  const base = { addr, curDay: meta.curDay, days: [meta.windowFrom, meta.curDay], totals: { d0: blank(), d1: blank(), d7: blank() }, rows: [], count: 0 };
+  const base = { addr, at: meta.at, curDay: meta.curDay, days: [meta.windowFrom, meta.curDay], totals: { d0: blank(), d1: blank(), d7: blank() }, rows: [], count: 0 };
   if (ref < 0) return { ...base, found: false, reason: "该地址近 7 天没有伞下记录（或没有下级）" };
 
   /* 2. ref → dfs 区间 */
