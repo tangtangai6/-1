@@ -2,13 +2,11 @@ name: 更新 LGNS Terminal
 
 on:
   schedule:
-    - cron: "17 */4 * * *"   # 每 4 小时一次（UTC 时间，北京时间 0/4/8/12/16/20 点过 17 分）
-  workflow_dispatch:          # 允许在 Actions 页面手动点「Run workflow」
+    - cron: "*/30 * * * *"   # 每 30 分钟（UTC）
+  workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: lgns-update
@@ -25,9 +23,8 @@ jobs:
         with:
           node-version: 20
 
-      # 扫链进度存在 GitHub 缓存里（约 120MB 压缩），每次只补新区块
+      # 扫链进度存在 GitHub 缓存里（约 115MB 压缩），每次只补新区块
       - name: 读取上次的扫链进度
-        id: restore
         uses: actions/cache/restore@v4
         with:
           path: data
@@ -42,6 +39,9 @@ jobs:
           node --max-old-space-size=6144 collector.js --once --standalone
           test -f LGNS-Terminal.html
 
+      - name: 生成团队新增查询数据
+        run: node --max-old-space-size=6144 tools/build-growth.js
+
       - name: 保存扫链进度
         if: always()
         uses: actions/cache/save@v4
@@ -49,22 +49,14 @@ jobs:
           path: data
           key: lgns-data-${{ github.run_id }}
 
-      - name: 准备网页
+      - name: 准备发布目录
         run: |
-          mkdir -p site
+          mkdir -p site/data
           cp LGNS-Terminal.html site/index.html
-          touch site/.nojekyll
+          cp -R growth-data/. site/data/
 
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - name: 部署到 Cloudflare Workers
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx -y wrangler@4.165.0 deploy
