@@ -5,5 +5,6 @@ growth-data/
 tmp/
 node_modules/
 .wrangler/
+.dev.vars
 *.tmp
 .DS_Store

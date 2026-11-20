@@ -99,7 +99,7 @@ const call = (to, sel, ...args) => ({ to, data: SEL[sel] + args.map(a => typeof 
 
 /* ================= 数据层 ================= */
 const D = { at: 0, health: {} };
-const Q = { burnDay: 0, burners: {}, elig: null, eligAddr: "", addr: null, addrQ: "", holders: [], holdersNext: null, holdersBusy: false, rank: "day", rankData: {}, kline: "1h", klineData: {}, burnSearch: "", calc: {}, perms: null, permsBusy: false, actOff: 0, team: { addr: "", for: "", win: "d7", data: null, loading: false, err: "", q: "", sort: "dai", dir: -1, page: 0 } };
+const Q = { burnDay: 0, burners: {}, elig: null, eligAddr: "", addr: null, addrQ: "", holders: [], holdersNext: null, holdersBusy: false, rank: "day", rankData: {}, kline: "1h", klineData: {}, burnSearch: "", calc: {}, perms: null, permsBusy: false, actOff: 0, team: { addr: "", for: "", win: "d7", data: null, loading: false, err: "", q: "", sort: "dai", dir: -1, open: [false, false, false, false], bpage: [0, 0, 0, 0] } };
 const HN = { ov: "官方 /overview", feed: "官方 /overview/feed", pw: "官方 /power", em: "官方 /emission", pr: "官方 /protocol", ve: "官方 /ve", pools: "官方 /pools", tb: "官方 /turbine", pol: "官方 /pol", lv: "官方 /level", price: "官方 /price", ga: "官方 /gauge", k1: "官方 /kline", ch: "Anubis 链 RPC", hc: "Blockscout", my: "本地采集器" };
 async function safe(name, fn) { const t = Date.now(); try { const v = await fn(); D.health[name] = { ok: true, ms: Date.now() - t }; return v; } catch (e) { D.health[name] = { ok: false, ms: Date.now() - t, err: String(e.message || e) }; return null; } }
 
@@ -894,11 +894,12 @@ ${rows.length > 500 ? `<p class="note">只显示前 500 条，导出 CSV 可拿�
 /* ================= 团队新增业绩（Worker API） ================= */
 const TEAM_WIN = [["d0", "今天"], ["d1", "昨天"], ["d7", "近 7 天"]];
 const TEAM_COLS = [["joins", "新加入", 0], ["dai", "入金 DAI", 2], ["power", "新增算力", -1], ["turbDai", "涡轮 DAI", 2], ["veAi", "锁仓 AiLGNS", 4], ["burnLgns", "销毁 LGNS", 0]];
+const TEAM_BUCKETS = [["≥ 1 万", 10000, Infinity], ["5 千 – 1 万", 5000, 10000], ["1 千 – 5 千", 1000, 5000], ["< 1 千", -Infinity, 1000]];
 function teamVal(r, k, d) { return d < 0 ? cp(r[k]) : fmt(r[k], d); }
 async function loadTeam(addr) {
   addr = String(addr || "").toLowerCase();
   if (!isAddr(addr)) return;
-  Q.team.addr = addr; Q.team.for = ""; Q.team.data = null; Q.team.loading = true; Q.team.err = ""; Q.team.page = 0;
+  Q.team.addr = addr; Q.team.for = ""; Q.team.data = null; Q.team.loading = true; Q.team.err = ""; Q.team.open = [false, false, false, false]; Q.team.bpage = [0, 0, 0, 0];
   if (route().p === "growth") render();
   try {
     const r = await fetch(`/api/team?addr=${addr}`, { credentials: "same-origin", headers: { accept: "application/json" } });
@@ -915,20 +916,22 @@ function teamCsv() {
   const w = Q.team.win, q = (Q.team.q || "").trim().toLowerCase();
   let list = q ? d.rows.filter(r => r.a.includes(q)) : d.rows.slice();
   list.sort((a, b) => { const x = a[w][Q.team.sort] || 0, y = b[w][Q.team.sort] || 0; return Q.team.dir > 0 ? x - y : y - x; });
-  const H = ["地址", ...TEAM_COLS.map(c => c[1])];
-  csvDownload(`团队新增_${w}_${d.addr.slice(0, 8)}.csv`, [H, ...list.map(r => [r.a, ...TEAM_COLS.map(([k]) => r[w][k] ?? 0)])]);
+  const H = ["分区", "地址", ...TEAM_COLS.map(c => c[1])], out = [];
+  for (const [name, lo, hi] of TEAM_BUCKETS) for (const r of list) { const v = r[w].dai || 0; if (v >= lo && v < hi) out.push([name, r.a, ...TEAM_COLS.map(([k]) => r[w][k] ?? 0)]); }
+  csvDownload(`团队新增_${w}_${d.addr.slice(0, 8)}.csv`, [H, ...out]);
 }
 function pageGrowth(arg) {
   if (isAddr(arg) && arg.toLowerCase() !== Q.team.addr) { Q.team.addr = arg.toLowerCase(); Q.team.for = ""; Q.team.data = null; Q.team.err = ""; }
-  const head = ph("团队新增业绩", "输入任意地址，看它伞下今天 / 昨天 / 近 7 天的新增，逐地址明细。");
+  const head = ph("团队新增业绩", "输入任意地址，看它伞下今天 / 昨天 / 近 7 天的新增，按入金分成 4 个分区。");
   const form = `<div class="card"><form class="form" id="teamForm"><input id="teamIn" placeholder="输入 0x 团队长地址" value="${esc(Q.team.addr)}" autocomplete="off" spellcheck="false"><button class="btn">查询</button></form>
-<div class="row mt"><div class="seg" id="teamSeg">${TEAM_WIN.map(([k, n]) => `<button data-tw="${k}" class="${Q.team.win === k ? "on" : ""}">${n}</button>`).join("")}</div><span class="tag il ml">${Q.team.data ? `协议第 ${Q.team.data.curDay} 天 · 更新于 ${ago(Q.team.data.at || Date.now())}` : "每 4 小时更新"}</span></div></div>`;
-  if (!Q.team.addr) return head + form + `<div class="card mt"><p class="note" style="margin:0">粘贴任意地址查询。只列出这段时间有新增的地址，可按任意列排序、按地址搜索、导出 CSV。</p></div>`;
+<div class="row mt"><div class="seg" id="teamSeg">${TEAM_WIN.map(([k, n]) => `<button data-tw="${k}" class="${Q.team.win === k ? "on" : ""}">${n}</button>`).join("")}</div><span class="tag il ml">${Q.team.data ? `协议第 ${Q.team.data.curDay} 天 · 更新于 ${ago(Q.team.data.at || Date.now())}` : "每 30 分钟更新"}</span></div></div>`;
+  if (!Q.team.addr) return head + form + `<div class="card mt"><p class="note" style="margin:0">粘贴任意地址查询。结果按所选时间段的「入金 DAI」分成 4 个分区：≥1 万、5 千–1 万、1 千–5 千、<1 千；分区默认收起，点标题展开。</p></div>`;
   if (Q.team.loading) return head + form + `<div class="card mt"><div class="empty">正在查询伞下新增…</div></div>`;
   if (Q.team.err) return head + form + `<div class="verdict no">查询失败：${esc(Q.team.err)}</div>`;
   const d = Q.team.data;
   if (!d) return head + form;
   if (!d.found) return head + form + `<div class="verdict wn">${esc(d.reason || "这个地址近 7 天没有伞下记录")}</div>`;
+
   const w = Q.team.win, T = d.totals[w] || {};
   const kpis = `<div class="grid g4 mt">
 ${kpi("伞下新加入", fmt(T.joins, 0), "人", `伞下共 ${fmt(d.size, 0)} 人`, info("所选时间段内伞下新绑定推荐关系的人数（不含迁移导入）。", "Community Joined 事件"), "hl")}
@@ -936,19 +939,33 @@ ${kpi("伞下入金", fmt(T.dai, 2), "DAI", `新增算力 ${cp(T.power)}`, info(
 ${kpi("伞下涡轮", fmt(T.turbDai, 2), "DAI", `激活 ${fmt(T.turbAi, 4)} AiLGNS`, info("所选时间段内伞下激活涡轮花的 DAI。", "Turbine 激活事件"), "or")}
 ${kpi("伞下锁仓", fmt(T.veAi, 4), "AiLGNS", `销毁 ${fmt(T.burnLgns, 0)} LGNS · ${fmt(T.burnCnt, 0)} 笔`, info("所选时间段内伞下新建治理锁仓与永久治理销毁。", "VePositionCreated + PermanentBurned 事件"))}
 </div>`;
+
   const q = (Q.team.q || "").trim().toLowerCase();
   let list = q ? d.rows.filter(r => r.a.includes(q)) : d.rows.slice();
   const key = Q.team.sort, dir = Q.team.dir;
   list.sort((a, b) => { const x = a[w][key] || 0, y = b[w][key] || 0; return dir > 0 ? x - y : y - x; });
-  const PER = 50, total = list.length, pages = Math.max(1, Math.ceil(total / PER));
-  if (Q.team.page >= pages) Q.team.page = pages - 1;
-  const page = Math.max(0, Q.team.page), shown = list.slice(page * PER, page * PER + PER);
+
   const th = TEAM_COLS.map(([k, n]) => `<th class="r" data-sort="${k}" style="cursor:pointer;white-space:nowrap">${n}${Q.team.sort === k ? (Q.team.dir < 0 ? " ↓" : " ↑") : ""}</th>`).join("");
-  const tr = shown.map((r, i) => `<tr><td>${page * PER + i + 1}</td><td>${addrLink(r.a)}</td>${TEAM_COLS.map(([k, , dg]) => `<td class="r">${teamVal(r[w], k, dg)}</td>`).join("")}</tr>`).join("");
+  const groups = TEAM_BUCKETS.map(([name, lo, hi]) => {
+    const rows = list.filter(r => { const v = r[w].dai || 0; return v >= lo && v < hi; });
+    return { name, rows, sum: rows.reduce((s, r) => s + (r[w].dai || 0), 0) };
+  });
+  const sections = groups.map((g, gi) => {
+    const open = !!Q.team.open[gi], cnt = g.rows.length;
+    const pages = Math.max(1, Math.ceil(cnt / 50));
+    let page = Q.team.bpage[gi] || 0; if (page >= pages) page = pages - 1;
+    const shown = g.rows.slice(page * 50, page * 50 + 50);
+    const tr = shown.map((r, i) => `<tr><td>${page * 50 + i + 1}</td><td>${addrLink(r.a)}</td>${TEAM_COLS.map(([k, , dg]) => `<td class="r">${teamVal(r[w], k, dg)}</td>`).join("")}</tr>`).join("") || `<tr><td colspan="8" class="empty">${q ? "没有匹配的地址" : "这个分区没有新增"}</td></tr>`;
+    const pager = cnt > 50 ? `<div class="row" style="padding:8px 12px"><button class="btn gh sm" data-bp="${gi}" data-bd="-1" ${page <= 0 ? "disabled" : ""}>上一页</button><span class="tag il" style="margin:0 8px">第 ${page + 1} / ${pages} 页</span><button class="btn gh sm" data-bp="${gi}" data-bd="1" ${page >= pages - 1 ? "disabled" : ""}>下一页</button></div>` : "";
+    return `<div class="card p0 mt"><button class="teamHead" data-bk="${gi}"><span class="tag il">${open ? "▾" : "▸"}</span><b>入金 ${g.name}</b><span class="tag il ml">${fmt(cnt, 0)} 个地址</span><span class="ml">合计 ${fmt(g.sum, 2)} DAI</span><span class="ml" style="color:#8591a5;font-size:12px">${open ? "点击收起" : "点击展开"}</span></button>${open ? `<div class="scroll maxh"><table class="tbl"><thead><tr><th>#</th><th>地址</th>${th}</tr></thead><tbody>${tr}</tbody></table></div>${pager}` : ""}</div>`;
+  }).join("");
+  const anyOpen = Q.team.open.some(Boolean);
+
   return head + form +
     `<div class="card mt"><div class="row"><b class="mono" style="word-break:break-all">${esc(d.addr)}</b><span class="ml">伞下 ${fmt(d.size, 0)} 人</span><span class="ml">${addrLink(d.addr, "看这个地址 →")}</span></div></div>` + kpis +
-    `<div class="card mt"><div class="row"><input id="teamQ" placeholder="按地址搜索" value="${esc(Q.team.q)}" style="max-width:300px"><span class="tag il ml">${fmt(total, 0)} 个地址有新增</span><span style="flex:1"></span><button class="btn gh sm" id="teamPrev" ${page <= 0 ? "disabled" : ""}>上一页</button><span class="tag il" style="margin:0 8px">第 ${page + 1} / ${pages} 页</span><button class="btn gh sm" id="teamNext" ${page >= pages - 1 ? "disabled" : ""}>下一页</button><button class="btn gh sm" id="teamCsv">导出 CSV</button></div></div>` +
-    `<div class="card p0 scroll maxh"><table class="tbl"><thead><tr><th>#</th><th>地址</th>${th}</tr></thead><tbody>${tr || `<tr><td colspan="8" class="empty">${q ? "没有匹配的地址" : "这个时间段没有新增"}</td></tr>`}</tbody></table></div>` +
+    `<div class="card mt"><div class="row"><input id="teamQ" placeholder="按地址搜索" value="${esc(Q.team.q)}" style="max-width:300px"><span class="tag il ml">${fmt(list.length, 0)} 个地址有新增</span><span style="flex:1"></span><button class="btn gh sm" id="teamAll">${anyOpen ? "全部收起" : "全部展开"}</button><button class="btn gh sm" id="teamCsv">导出 CSV</button></div></div>` +
+    `<div class="note mt">按所选时间段的「入金 DAI」分区；点分区标题展开/收起，展开后每页 50 条。</div>` +
+    sections +
     `<p class="note">「新增」按协议日统计，含入金、涡轮、锁仓、销毁与新加入；数字为采集器快照，上方显示更新时间。</p>`;
 }
 
@@ -1064,12 +1081,13 @@ function bindPage(p) {
   $$("#lvSeg [data-lv]").forEach(b => b.onclick = () => { Q.lvTab = b.dataset.lv; render(); });
   const lq = $("#lvQ"); if (lq) lq.oninput = () => { Q.lvQ = lq.value; clearTimeout(lq._t); lq._t = setTimeout(render, 250); };
   const tf = $("#teamForm"); if (tf) tf.onsubmit = e => { e.preventDefault(); const v = $("#teamIn").value.trim().toLowerCase(); if (!isAddr(v)) return $("#teamIn").classList.add("err"); if (location.hash !== "#/growth/" + v) location.hash = "#/growth/" + v; else loadTeam(v); };
-  $$("#teamSeg [data-tw]").forEach(b => b.onclick = () => { Q.team.win = b.dataset.tw; render(); });
-  $$("[data-sort]").forEach(h => h.onclick = () => { const k = h.dataset.sort; if (Q.team.sort === k) Q.team.dir *= -1; else { Q.team.sort = k; Q.team.dir = -1; } Q.team.page = 0; render(); });
-  const tq = $("#teamQ"); if (tq) tq.oninput = () => { Q.team.q = tq.value; Q.team.page = 0; clearTimeout(tq._t); tq._t = setTimeout(render, 220); };
+  $$("#teamSeg [data-tw]").forEach(b => b.onclick = () => { Q.team.win = b.dataset.tw; Q.team.bpage = [0, 0, 0, 0]; render(); });
+  $$("[data-sort]").forEach(h => h.onclick = () => { const k = h.dataset.sort; if (Q.team.sort === k) Q.team.dir *= -1; else { Q.team.sort = k; Q.team.dir = -1; } Q.team.bpage = [0, 0, 0, 0]; render(); });
+  const tq = $("#teamQ"); if (tq) tq.oninput = () => { Q.team.q = tq.value; Q.team.bpage = [0, 0, 0, 0]; clearTimeout(tq._t); tq._t = setTimeout(render, 220); };
   const tc = $("#teamCsv"); if (tc) tc.onclick = teamCsv;
-  const tp = $("#teamPrev"); if (tp) tp.onclick = () => { if (Q.team.page > 0) { Q.team.page--; render(); } };
-  const tn = $("#teamNext"); if (tn && !tn.disabled) tn.onclick = () => { Q.team.page++; render(); };
+  $$("[data-bk]").forEach(b => b.onclick = () => { const i = +b.dataset.bk; Q.team.open[i] = !Q.team.open[i]; render(); });
+  $$("[data-bp]").forEach(b => b.onclick = () => { const i = +b.dataset.bp, d = +b.dataset.bd, p = (Q.team.bpage[i] || 0) + d; if (p >= 0) { Q.team.bpage[i] = p; render(); } });
+  const ta = $("#teamAll"); if (ta) ta.onclick = () => { const open = !Q.team.open.some(Boolean); Q.team.open = Q.team.open.map(() => open); render(); };
   $$("#chgSeg [data-chg]").forEach(b => b.onclick = () => { Q.chgK = b.dataset.chg; render(); });
   $$("[data-csv]").forEach(b => b.onclick = () => exportCsv(b.dataset.csv));
   if (p === "calc") { $$("#page input,#page select").forEach(i => { i.oninput = calcRun; i.onchange = calcRun; }); calcRun(); }
