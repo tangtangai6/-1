@@ -938,10 +938,10 @@ function teamCsv() {
   csvDownload(`团队新增_${w}_${d.addr.slice(0, 8)}.csv`, [H, ...out]);
 }
 function teamLineCsv() {
-  const d = Q.team.data; if (!d || !d.rows) return;
+  const d = Q.team.data; if (!d) return;
   const w = Q.team.win, q = (Q.team.q || "").trim().toLowerCase();
-  const list = q ? d.rows.filter(r => r.a.includes(q)) : d.rows;
-  const lines = teamLines(list, w);
+  const list = q ? (d.rows || []).filter(r => r.a.includes(q)) : (d.rows || []);
+  const lines = d.lineSummary ? d.lineSummary.map(x => ({ a: x.line, n: x.n, m: x.m })) : teamLines(list, w);
   const H = ["直推线", "人数", "入金 DAI", "新加入", "新增算力", "涡轮 DAI", "锁仓 AiLGNS"];
   csvDownload(`直推线汇总_${w}_${d.addr.slice(0, 8)}.csv`, [H, ...lines.map(l => [l.a || "未知", l.n, +l.m.dai.toFixed(6), l.m.joins, +l.m.power.toFixed(6), +l.m.turbDai.toFixed(6), +l.m.veAi.toFixed(6)])]);
 }
@@ -970,6 +970,16 @@ ${kpi("伞下入金", fmt(T.dai, 2), "DAI", `新增算力 ${cp(T.power)}`, info(
 ${kpi("伞下涡轮", fmt(T.turbDai, 2), "DAI", `激活 ${fmt(T.turbAi, 4)} AiLGNS`, info("所选时间段内伞下激活涡轮花的 DAI。", "Turbine 激活事件"), "or")}
 ${kpi("伞下锁仓", fmt(T.veAi, 4), "AiLGNS", `销毁 ${fmt(T.burnLgns, 0)} LGNS · ${fmt(T.burnCnt, 0)} 笔`, info("所选时间段内伞下新建治理锁仓与永久治理销毁。", "VePositionCreated + PermanentBurned 事件"))}
 </div>`;
+
+  if (d.tooLarge) {
+    const lines = (d.lineSummary || []).map(x => ({ a: x.line, n: x.n, m: x.m }));
+    const lineDai = lines.reduce((s, l) => s + l.m.dai, 0);
+    const lineTable = `<div class="card mt"><div class="row" style="padding:10px 14px"><b>直推线汇总</b><span class="tag il ml">${fmt(lines.length, 0)} 条线</span><span class="ml">合计 ${fmt(lineDai, 2)} DAI</span><span style="flex:1"></span><button class="btn gh sm" id="teamLineCsv">导出直推线 CSV</button></div><div class="scroll maxh"><table class="tbl"><thead><tr><th>直推线</th><th class="r">人数</th><th class="r">入金 DAI</th><th class="r">新加入</th><th class="r">新增算力</th><th class="r">涡轮 DAI</th><th class="r">锁仓 AiLGNS</th></tr></thead><tbody>${lines.map(l => `<tr><td>${addrLink(l.a)}</td><td class="r">${fmt(l.n, 0)}</td><td class="r"><b>${fmt(l.m.dai, 2)}</b></td><td class="r">${fmt(l.m.joins, 0)}</td><td class="r">${cp(l.m.power)}</td><td class="r">${fmt(l.m.turbDai, 2)}</td><td class="r">${fmt(l.m.veAi, 4)}</td></tr>`).join("") || `<tr><td colspan="7" class="empty">这段时间没有直推线新增</td></tr>`}</tbody></table></div></div>`;
+    return head + form +
+      `<div class="card mt"><div class="row"><b class="mono" style="word-break:break-all">${esc(d.addr)}</b><span class="ml">伞下 ${fmt(d.size, 0)} 人</span><span class="ml">${addrLink(d.addr, "看这个地址 →")}</span></div></div>` + kpis +
+      `<div class="verdict wn" style="margin-top:12px">这个团队超过 10 万人，逐地址明细会超过服务器计算上限。下面是按直推线的汇总；想看逐地址明细，请点某条直推线地址再查它。</div>` +
+      lineTable;
+  }
 
   const q = (Q.team.q || "").trim().toLowerCase();
   let list = q ? d.rows.filter(r => r.a.includes(q)) : d.rows.slice();
