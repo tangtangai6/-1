@@ -208,3 +208,43 @@ export async function queryTeam(addr, read, meta) {
   return { ...base, found: true, totals, rows, count: rows.length, start, size, lineUnavailable: false };
 
 }
+
+
+export async function queryZones(addr, read, meta) {
+  addr = String(addr || "").toLowerCase();
+  const cache = new Map();
+  const get = async p => { let b = cache.get(p); if (!b) { const ab = await read(p); b = new Uint8Array(ab); cache.set(p, b); } return b; };
+  if (!meta.top3) return { zoneLines: [] };
+  const h = fnv(addr), MASK = (1 << meta.hash.slotBits) - 1;
+  let slot = h & MASK, ref = -1;
+  for (let p = 0; p < 64; p++) {
+    const c = slot >>> meta.hash.chunkShift;
+    const buf = await get(`hash/${pad4(c)}.bin`);
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    const off = (slot & ((1 << meta.hash.chunkShift) - 1)) * 8;
+    const fp = dv.getUint32(off, true), r = dv.getUint32(off + 4, true);
+    if (!r) break;
+    if (fp === h) { ref = r - 1; break; }
+    slot = (slot + 1) & MASK;
+  }
+  if (ref < 0) return { zoneLines: [] };
+  const c3 = ref >>> meta.top3.chunkShift;
+  const buf = await get(`top3/${pad4(c3)}.bin`);
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const off = (ref & ((1 << meta.top3.chunkShift) - 1)) * 24;
+  const zl = [];
+  for (let k = 0; k < 3; k++) {
+    const id = dv.getUint32(off + k * 8, true), v = dv.getFloat32(off + k * 8 + 4, true);
+    if (id !== 0xFFFFFFFF) zl.push({ dfs: id, v });
+  }
+  const byBlock = new Map();
+  for (const x of zl) { const b = x.dfs >>> meta.lineaddr.blockShift; let arr = byBlock.get(b); if (!arr) byBlock.set(b, arr = []); arr.push(x.dfs); }
+  const addrMap = new Map();
+  for (const b of byBlock.keys()) {
+    const lb = await get(`lineaddr/${pad4(b)}.bin`);
+    const ldv = new DataView(lb.buffer, lb.byteOffset, lb.byteLength);
+    const cnt = ldv.getUint32(0, true);
+    for (let k = 0; k < cnt; k++) { const o = 4 + k * 24; addrMap.set(ldv.getUint32(o, true), hexAddr(ldv, o + 4)); }
+  }
+  return { zoneLines: zl.map(x => ({ a: addrMap.get(x.dfs) || null, v: x.v })) };
+}

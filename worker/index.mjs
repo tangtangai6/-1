@@ -1,5 +1,5 @@
 import { sha256Hex, makeSession, sessionOk, getCookie, timingEqual, sleep } from "./auth.mjs";
-import { queryTeam } from "./team.mjs";
+import { queryTeam, queryZones } from "./team.mjs";
 
 const COOKIE = "lt_session";
 const MAX_AGE = 90 * 86400;
@@ -80,6 +80,16 @@ export default {
     }
 
     if (url.pathname === "/api/health") return json({ ok: true });
+    if (url.pathname === "/api/zones") {
+      const addr = String(url.searchParams.get("addr") || "").trim().toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(addr)) return json({ error: "badaddr" }, 400);
+      try {
+        const metaRes = await env.ASSETS.fetch(new URL("/data/meta.json", url));
+        const meta = await metaRes.json();
+        const read = async (p) => { const r = await env.ASSETS.fetch(new URL("/data/" + p, url)); if (!r.ok) throw new Error("missing " + p); return await r.arrayBuffer(); };
+        return json(await queryZones(addr, read, meta));
+      } catch (e) { return json({ error: String((e && e.message) || e) }, 500); }
+    }
     if (url.pathname === "/api/team") {
       const addr = String(url.searchParams.get("addr") || "").trim().toLowerCase();
       if (!/^0x[0-9a-f]{40}$/.test(addr)) return json({ error: "badaddr" }, 400);

@@ -55,6 +55,19 @@ if (t !== n) console.warn(`警告：只遍历到 ${t}/${n} 个节点`);
 const size = new Uint32Array(n);
 for (let k = t - 1; k >= 0; k--) { const u = order[k]; if (par[u] >= 0) size[par[u]] += size[u] + 1; }
 console.log(`DFS 完成 ${(Date.now() - t0) / 1000}s`);
+
+/* ---- 累计入金（全历史）与每条直推线的累计，用于“三区对应地址” ---- */
+const subAll = Float64Array.from(selfAll);
+for (let k = t - 1; k >= 0; k--) { const u = order[k], p = par[u]; if (p >= 0) subAll[p] += subAll[u]; }
+const T1 = new Uint32Array(n).fill(0xFFFFFFFF), T2 = new Uint32Array(n).fill(0xFFFFFFFF), T3 = new Uint32Array(n).fill(0xFFFFFFFF);
+const A1 = new Float64Array(n), A2 = new Float64Array(n), A3 = new Float64Array(n);
+for (let i = 0; i < n; i++) {
+  const p = par[i]; if (p < 0) continue;
+  const v = subAll[i];
+  if (v > A1[p]) { A3[p] = A2[p]; T3[p] = T2[p]; A2[p] = A1[p]; T2[p] = T1[p]; A1[p] = v; T1[p] = i; }
+  else if (v > A2[p]) { A3[p] = A2[p]; T3[p] = T2[p]; A2[p] = v; T2[p] = i; }
+  else if (v > A3[p]) { A3[p] = v; T3[p] = i; }
+}
 const parentDfs = new Uint32Array(n).fill(0xFFFFFFFF);
 for (let i = 0; i < n; i++) if (par[i] >= 0) parentDfs[dfs[i]] = dfs[par[i]];
 const sizeDfs = new Uint32Array(n);
@@ -62,7 +75,9 @@ for (let i = 0; i < n; i++) sizeDfs[dfs[i]] = size[i];
 
 /* ---- 近 7 天活动记录 ---- */
 const recs = [];
+const selfAll = new Float64Array(n);
 for (const row of s.flows || []) {
+  selfAll[Math.floor(row[0] / 4096)] += row[1] || 0;
   const key = row[0], day = key % 4096;
   if (day < FROM || day > CURDAY) continue;
   const u = Math.floor(key / 4096);
@@ -216,12 +231,12 @@ for (let i = 0; i < n; i++) if (size[i] > 0) refCount++;
 const SLOT_SHF = Math.max(12, Math.ceil(Math.log2(refCount * 2.5)));
 const SLOTS = 1 << SLOT_SHF, MASK = SLOTS - 1;
 const fp = new Uint32Array(SLOTS), rf = new Uint32Array(SLOTS); // rf = refIndex+1, 0 空
-const refDfs = new Uint32Array(refCount), refSize = new Uint32Array(refCount);
+const refDfs = new Uint32Array(refCount), refSize = new Uint32Array(refCount), refNode = new Uint32Array(refCount);
 let ri = 0, maxProbe = 0;
 for (let i = 0; i < n; i++) {
   if (size[i] <= 0) continue;
   const idx = ri++;
-  refDfs[idx] = dfs[i]; refSize[idx] = size[i];
+  refDfs[idx] = dfs[i]; refSize[idx] = size[i]; refNode[idx] = i;
   const h = fnv(addrs[i]);
   let slot = h & MASK, p = 0;
   while (rf[slot] !== 0) { slot = (slot + 1) & MASK; p++; }
@@ -249,11 +264,28 @@ for (let c = 0; c < refChunks; c++) {
   fs.writeFileSync(path.join(OUT, "refs", pad4(c) + ".bin"), buf);
 }
 
+fs.mkdirSync(path.join(OUT, "top3"), { recursive: true });
+for (let c = 0; c < refChunks; c++) {
+  const startR = c * CHUNK, endR = Math.min(refCount, startR + CHUNK);
+  const buf = Buffer.alloc((endR - startR) * 24);
+  for (let k = startR; k < endR; k++) {
+    const node = refNode[k], o = (k - startR) * 24;
+    const ids = [T1[node], T2[node], T3[node]], amts = [A1[node], A2[node], A3[node]];
+    for (let q = 0; q < 3; q++) {
+      const line = ids[q] === 0xFFFFFFFF ? 0xFFFFFFFF : dfs[ids[q]];
+      buf.writeUInt32LE(line, o + q * 8);
+      buf.writeFloatLE(amts[q] || 0, o + q * 8 + 4);
+    }
+  }
+  fs.writeFileSync(path.join(OUT, "top3", pad4(c) + ".bin"), buf);
+}
+
 const meta = {
   at: Date.now(), curDay: CURDAY, windowFrom: FROM,
   nodes: n, recordCount: recs.length, refCount,
   hash: { slotBits: SLOT_SHF, chunkShift: CHUNK_SHF, chunks: hashChunks },
   refs: { chunkShift: CHUNK_SHF, chunks: refChunks },
+  top3: { chunkShift: CHUNK_SHF, chunks: refChunks },
   parent: { bytes: n * 4 },
   lineaddr: { blockShift: 16, blocks: lineMax + 1 },
   rec: { blockShift: 16, blocks: maxBlock + 1, stride: STRIDE, large: LARGE, largeCap: CAP },
