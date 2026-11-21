@@ -56,23 +56,6 @@ const size = new Uint32Array(n);
 for (let k = t - 1; k >= 0; k--) { const u = order[k]; if (par[u] >= 0) size[par[u]] += size[u] + 1; }
 console.log(`DFS 完成 ${(Date.now() - t0) / 1000}s`);
 
-/* ---- 累计入金（全历史）与每条直推线的累计，用于“三区对应地址” ---- */
-const subAll = Float64Array.from(selfAll);
-for (let k = t - 1; k >= 0; k--) { const u = order[k], p = par[u]; if (p >= 0) subAll[p] += subAll[u]; }
-const T1 = new Uint32Array(n).fill(0xFFFFFFFF), T2 = new Uint32Array(n).fill(0xFFFFFFFF), T3 = new Uint32Array(n).fill(0xFFFFFFFF);
-const A1 = new Float64Array(n), A2 = new Float64Array(n), A3 = new Float64Array(n);
-for (let i = 0; i < n; i++) {
-  const p = par[i]; if (p < 0) continue;
-  const v = subAll[i];
-  if (v > A1[p]) { A3[p] = A2[p]; T3[p] = T2[p]; A2[p] = A1[p]; T2[p] = T1[p]; A1[p] = v; T1[p] = i; }
-  else if (v > A2[p]) { A3[p] = A2[p]; T3[p] = T2[p]; A2[p] = v; T2[p] = i; }
-  else if (v > A3[p]) { A3[p] = v; T3[p] = i; }
-}
-const parentDfs = new Uint32Array(n).fill(0xFFFFFFFF);
-for (let i = 0; i < n; i++) if (par[i] >= 0) parentDfs[dfs[i]] = dfs[par[i]];
-const sizeDfs = new Uint32Array(n);
-for (let i = 0; i < n; i++) sizeDfs[dfs[i]] = size[i];
-
 /* ---- 近 7 天活动记录 ---- */
 const recs = [];
 const selfAll = new Float64Array(n);
@@ -97,6 +80,25 @@ for (let i = 0; i < n; i++) {
   joins++;
 }
 recs.sort((x, y) => x.d - y.d || x.day - y.day);
+
+/* ---- 累计入金（全历史）与每条直推线的累计，用于“三区对应地址” ---- */
+const subAll = Float64Array.from(selfAll);
+for (let k = t - 1; k >= 0; k--) { const u = order[k], p = par[u]; if (p >= 0) subAll[p] += subAll[u]; }
+const T1 = new Uint32Array(n).fill(0xFFFFFFFF), T2 = new Uint32Array(n).fill(0xFFFFFFFF), T3 = new Uint32Array(n).fill(0xFFFFFFFF);
+const A1 = new Float64Array(n), A2 = new Float64Array(n), A3 = new Float64Array(n);
+for (let i = 0; i < n; i++) {
+  const p = par[i]; if (p < 0) continue;
+  const v = subAll[i];
+  if (v > A1[p]) { A3[p] = A2[p]; T3[p] = T2[p]; A2[p] = A1[p]; T2[p] = T1[p]; A1[p] = v; T1[p] = i; }
+  else if (v > A2[p]) { A3[p] = A2[p]; T3[p] = T2[p]; A2[p] = v; T2[p] = i; }
+  else if (v > A3[p]) { A3[p] = v; T3[p] = i; }
+}
+const parentDfs = new Uint32Array(n).fill(0xFFFFFFFF);
+for (let i = 0; i < n; i++) if (par[i] >= 0) parentDfs[dfs[i]] = dfs[par[i]];
+const sizeDfs = new Uint32Array(n);
+for (let i = 0; i < n; i++) sizeDfs[dfs[i]] = size[i];
+
+
 console.log(`记录 ${recs.length.toLocaleString()} 条（其中新加入 ${joins.toLocaleString()}）`);
 
 /* ---- 写记录分块（按 dfsId >> 16） ---- */
