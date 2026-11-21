@@ -20,10 +20,13 @@ jobs:
         run: node --max-old-space-size=6144 tools/stats.js
       - name: build growth data
         run: node --max-old-space-size=6144 tools/build-growth.js
+      - name: check zones
+        run: node --max-old-space-size=6144 tools/check-zones.js
       - uses: actions/upload-artifact@v4
         with:
           name: growth-data
           path: |
             stats.json
+            zones.json
             growth-data
           retention-days: 2
