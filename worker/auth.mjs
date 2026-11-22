@@ -31,7 +31,7 @@ export async function verifySig(secret, data, sig) {
   const k = await hmacKey(secret);
   return crypto.subtle.verify("HMAC", k, b64urlDecode(sig), enc.encode(data));
 }
-export async function makeSession(secret, days = 90) {
+export async function makeSession(secret, days = 10) {
   const payload = b64url(enc.encode(JSON.stringify({ exp: Date.now() + days * 86400e3 })));
   return payload + "." + (await sign(secret, payload));
 }

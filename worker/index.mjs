@@ -2,7 +2,7 @@ import { sha256Hex, makeSession, sessionOk, getCookie, timingEqual, sleep } from
 import { queryTeam, queryZones } from "./team.mjs";
 
 const COOKIE = "lt_session";
-const MAX_AGE = 90 * 86400;
+const MAX_AGE = 10 * 86400;
 
 const json = (obj, status = 200) => new Response(JSON.stringify(obj), {
   status,
