@@ -793,7 +793,7 @@ ${sec("排放与领取")}
  ${kpi("社区池累计记账", nft && nft.poolCredited ? fmt(N(nft.poolCredited.growth) + N(nft.poolCredited.network) + N(nft.poolCredited.consensus), 6) : "—", "AiLGNS", "增长 + 网络 + 共识", info("三条动态线给这个地址记入的收益。", "/nft/{地址} poolCredited"))}
 </div>
 ${sec("每日获得明细", credits.length ? `共 ${credits.length} 天 · 合计 ${fmt(credits.reduce((s, c) => s + N(c.amount), 0), 4)} AiLGNS` : "")}
-${credits.length ? `<div class="card p0"><table class="tbl"><thead><tr><th>#</th><th>时间（北京）</th><th class="r">当天获得 AiLGNS</th><th class="r">占累计</th><th>交易</th></tr></thead><tbody>${credits.slice(0, Math.max(20, x.creditLimit || 20)).map((c, i) => `<tr><td>${i + 1}</td><td class="mono">${bj(c.ts)}</td><td class="r"><b>${fmt(N(c.amount), 4)}</b></td><td class="r">${fin(creditedTotal) && creditedTotal > 0 ? (N(c.amount) / creditedTotal * 100).toFixed(2) + "%" : "—"}</td><td>${c.tx ? exLink("tx/" + c.tx, "↗") : ""}</td></tr>`).join("")}</tbody></table></div>${(x.creditLimit || 20) < credits.length || !x.creditFull ? `<div id="creditMore" class="note" style="text-align:center;padding:12px">${x.creditBusy ? "正在加载更多…" : "向下滚动加载更多…"}</div>` : ""}` : `<div class="card"><div class="empty">暂无每日记入记录</div></div>`}
+${credits.length ? `<div class="card p0"><table class="tbl"><thead><tr><th>#</th><th>时间（北京）</th><th class="r">当天获得 AiLGNS</th><th class="r">占累计</th><th>交易</th></tr></thead><tbody>${credits.slice(0, Math.max(20, x.creditLimit || 20)).map((c, i) => `<tr><td>${i + 1}</td><td class="mono">${bj(c.ts)}</td><td class="r"><b>${fmt(N(c.amount), 4)}</b></td><td class="r">${fin(creditedTotal) && creditedTotal > 0 ? (N(c.amount) / creditedTotal * 100).toFixed(2) + "%" : "—"}</td><td>${c.tx ? exLink("tx/" + c.tx, "↗") : ""}</td></tr>`).join("")}</tbody></table></div>${(x.creditLimit || 20) < credits.length || !x.creditFull ? `<div style="text-align:center;padding:12px"><button class="btn gh" id="creditMore">${x.creditBusy ? "加载中…" : `加载更多（已显示 ${Math.min(x.creditLimit || 20, credits.length)} 条）`}</button></div>` : ""}` : `<div class="card"><div class="empty">暂无每日记入记录</div></div>`}
 <p class="note">来自官方 /emission/{地址} 的 accrued.credits（只返回最近 30 条）；完整历史以获得总额为准。</p>
 ${sec("500 LGNS 销毁资格")}
 <div class="card">${Q.elig && Q.elig.addr && Q.elig.addr.toLowerCase() === x.a.toLowerCase() ? eligView(Q.elig) : `<div class="empty">正在读取…</div>`}</div>
@@ -1194,12 +1194,7 @@ function bindPage(p) {
   const bq = $("#bdQ"); if (bq) bq.oninput = () => { Q.burnSearch = bq.value; clearTimeout(bq._t); bq._t = setTimeout(render, 250); };
   const ef = $("#eligForm"); if (ef) ef.onsubmit = e => { e.preventDefault(); checkElig($("#eligIn").value); };
   const af = $("#addrForm"); if (af) af.onsubmit = e => { e.preventDefault(); const v = $("#addrIn").value.trim(); if (isAddr(v)) { if (v === Q.addrQ) { Q.addrQ = ""; } location.hash = "#/address/" + v; render(); } else $("#addrIn").classList.add("err"); };
-  const cm = $("#creditMore");
-  if (cm) {
-    if (window.__creditObs) window.__creditObs.disconnect();
-    window.__creditObs = new IntersectionObserver(es => { if (es[0] && es[0].isIntersecting) loadMoreCredits(); }, { rootMargin: "260px" });
-    window.__creditObs.observe(cm);
-  }
+  const cm = $("#creditMore"); if (cm) cm.onclick = () => loadMoreCredits();
   const am = $("[data-act-more]"); if (am && Q.addr) am.onclick = () => { am.textContent = "加载中…"; loadAddr(Q.addr.a, (Q.addr.lim || 40) + 40); };
   const hm = $("#hMore"); if (hm) hm.onclick = () => loadHolders(true);
   const pr = $("#permReload"); if (pr) pr.onclick = () => { Q.perms = null; loadPerms(); };
