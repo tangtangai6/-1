@@ -717,6 +717,12 @@ function addrView(x) {
   const b = x.bal || {}, ps = x.p && x.p.summary, pl = pricePool(), c = x.c, l = x.l, nft = x.n, e = x.e;
   const totalA = D.pw ? N(D.pw.totalActivePower) : null, act = ps ? N(ps.activePower) : null, last = lastEmDay();
   const estDay = fin(act) && fin(totalA) && last ? act / totalA * N(last.communityStatic) : null;
+  const credits = (e && e.accrued && e.accrued.credits) || [];
+  const lastCredit = credits[0] || null;
+  const creditedTotal = e && e.accrued ? N(e.accrued.creditedTotal) : null;
+  const consumedTotal = e && e.accrued ? N(e.accrued.consumedTotal) : null;
+  const pendingTotal = fin(creditedTotal) && fin(consumedTotal) ? creditedTotal - consumedTotal : null;
+  const avg7 = credits.length ? credits.slice(0, Math.min(7, credits.length)).reduce((s, c) => s + N(c.amount), 0) / Math.min(7, credits.length) : null;
   return `<div class="card mt"><div class="row"><b class="mono" style="word-break:break-all">${esc(x.a)}</b>${nameOf(x.a) ? `<span class="pill ok">${esc(nameOf(x.a))}</span>` : ""}${b.contract ? `<span class="pill">合约</span>` : ""}<span class="ml">${exLink("address/" + x.a, "区块浏览器 ↗")}</span> <button class="btn gh sm" data-copy="${x.a}">复制地址</button></div></div>
 ${sec("余额")}
 <div class="grid g4">
@@ -739,7 +745,8 @@ ${c ? `<div class="grid g4">${kpi("团队人数", fmt(c.team, 0), "人", "", inf
 <details class="fold"><summary>直推明细（${(c.directs || []).length} 人，按有效算力排序）</summary><div class="card p0 scroll maxh"><table class="tbl"><thead><tr><th>#</th><th>地址</th><th class="r">有效算力</th><th>绑定时间</th></tr></thead><tbody>${(c.directs || []).slice().sort((p, q) => N(q.activePower) - N(p.activePower)).map((d, i) => `<tr><td>${i + 1}</td><td>${addrLink(d.address)}</td><td class="r">${cp(N(d.activePower))}</td><td class="mono">${d.boundAt ? bj(d.boundAt, false) : "—"}</td></tr>`).join("") || `<tr><td colspan="4" class="empty">没有直推</td></tr>`}</tbody></table></div></details>` : empty("官网没有这个地址的社区数据")}
 ${sec("排放与领取")}
 <div class="grid g4">
- ${kpi("累计已领取（记账）", fmt(e && e.accrued && N(e.accrued.consumedTotal), 6), "AiLGNS", "", info("累计领取的排放（记账数）。", "/emission/{地址} accrued.consumedTotal"))}
+ ${kpi("最近每日获得", lastCredit ? fmt(N(lastCredit.amount), 4) : "—", "AiLGNS", lastCredit ? `${bj(lastCredit.ts, false)} · 近 7 日均 ${fmt(avg7, 4)}` : "", info("最近一次结算记入的 AiLGNS；近 7 天为最近 7 条每日记录的平均。", "/emission/{地址} accrued.credits"), "hl")}
+ ${kpi("历史累计获得", fmt(creditedTotal, 4), "AiLGNS", pendingTotal != null ? `已领取 ${fmt(consumedTotal, 4)} · 未领取 ${fmt(pendingTotal, 4)}` : "", info("链上累计记入这个地址的 AiLGNS 排放（含未领取）；已领取为 consumedTotal。", "/emission/{地址} accrued.creditedTotal"))}
  ${kpi("涡轮激活次数", fmt(e && e.activations ? e.activations.length : null, 0), "", e && e.activations && e.activations.length ? `共花 ${fmt(e.activations.reduce((s, q) => s + N(q.daiSpent), 0), 2)} DAI` : "", info("激活涡轮的次数和花费。", "/emission/{地址} activations"))}
  ${kpi("生产 NFT", fmt(nft && nft.minted && nft.minted.tokens, 0), "", nft && nft.minted ? `剩余额度 ${fmt(N(nft.minted.remainingCapacityDaiNow), 2)} DAI` : "", info("NFT 数量与剩余收益额度。", "/nft/{地址}"))}
  ${kpi("社区池累计记账", nft && nft.poolCredited ? fmt(N(nft.poolCredited.growth) + N(nft.poolCredited.network) + N(nft.poolCredited.consensus), 6) : "—", "AiLGNS", "增长 + 网络 + 共识", info("三条动态线给这个地址记入的收益。", "/nft/{地址} poolCredited"))}
