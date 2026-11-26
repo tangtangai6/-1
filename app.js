@@ -685,6 +685,7 @@ async function loadAddr(a, lim) {
     fetch(`/api/zones?addr=${a}`, { credentials: "same-origin", headers: { accept: "application/json" } }).then(r => r.ok ? r.json() : null).catch(() => null)]);
   if (a !== Q.addrQ) return;
   Q.addr = { a, bal: bal ? { ai: bal[0] ? U(W(bal[0], 0)) : null, lgns: bal[1] ? U(W(bal[1], 0), 9) : null, dai: bal[2] ? U(BigInt(bal[2])) : null, stake: bal[3] ? U(W(bal[3], 0), 9) : null, contract: bal[4] && bal[4] !== "0x" } : null, p, e, c, l, n, act, tbA, veA, z, lim: L };
+  if (!D.lv) api("/level").then(x => { if (x) { D.lv = x; if (route().p === "address") render(); } }).catch(() => { });
   if (route().p === "address") render();
   if (!lim && Q.eligAddr.toLowerCase() !== a.toLowerCase()) checkElig(a, false);
 }
@@ -696,7 +697,9 @@ function levelProgress(l, zoneLines) {
   const next = th.find(t => N(t.level) === cur + 1);
   const ve = N(l.veUsd) || 0;
   const zs = (l.zones || []).map(z => N(z) || 0);
-  if (!next) return `<div class="card mt"><div class="row"><b>等级进度</b><span class="pill ok ml">P${cur}</span><span class="ml">已达最高等级</span></div></div>`;
+  if (!th.length) return `<div class="card mt"><div class="row"><b>等级进度</b><span class="pill wn ml">P${cur}</span><span class="ml">升级门槛数据未加载，请稍后刷新</span></div></div>`;
+  const maxLv = Math.max(...th.map(t => N(t.level)));
+  if (!next) return `<div class="card mt"><div class="row"><b>等级进度</b><span class="pill ok ml">P${cur}</span><span class="ml">${cur >= maxLv ? "已达最高等级" : "暂无下一级门槛数据"}</span></div></div>`;
   const veReq = N(next.veUsd) || 0, veGap = Math.max(0, veReq - ve);
   const zr = next.zoneUsd != null ? N(next.zoneUsd) : null;
   const zMet = zr ? zs.filter(z => z >= zr).length : null;
