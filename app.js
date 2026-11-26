@@ -683,9 +683,19 @@ async function fetchAllCreditActivities(a) {
     const rest = await Promise.all([...Array(pages - 1)].map((_, i) => api(`/activity/${a}?limit=100&offset=${(i + 1) * 100}`).catch(() => null)));
     for (const j of rest) if (j) rows.push(...(j.rows || []));
   }
-  const map = new Map();
-  for (const r of rows) if (r.module === "emission" && r.method === "ClaimCredited") map.set(r.tx || r.ts, { ts: r.ts, amount: r.amount, tx: r.tx });
-  return [...map.values()].sort((x, y) => new Date(y.ts) - new Date(x.ts));
+  const seen = new Set(), byDay = new Map();
+  for (const r of rows) {
+    if (r.module !== "emission" || r.method !== "ClaimCredited") continue;
+    const key = (r.tx || "") + ":" + (r.logIndex || "");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const day = bj(r.ts, false).slice(0, 5);
+    let x = byDay.get(day);
+    if (!x) byDay.set(day, x = { ts: r.ts, amount: 0, tx: r.tx, n: 0 });
+    x.amount += N(r.amount) || 0; x.n++;
+    if (new Date(r.ts) > new Date(x.ts)) { x.ts = r.ts; x.tx = r.tx; }
+  }
+  return [...byDay.values()].sort((x, y) => new Date(y.ts) - new Date(x.ts));
 }
 async function loadMoreCredits() {
   const x = Q.addr; if (!x || x.creditBusy) return;
@@ -694,9 +704,7 @@ async function loadMoreCredits() {
   x.creditBusy = true; render();
   try {
     const all = await fetchAllCreditActivities(x.a);
-    const map = new Map();
-    for (const c of [...(x.credits || []), ...all]) map.set(c.tx || c.ts, c);
-    x.credits = [...map.values()].sort((a, b) => new Date(b.ts) - new Date(a.ts));
+    if (all.length) x.credits = all;
     x.creditFull = true;
     x.creditLimit = (x.creditLimit || 20) + 20;
   } catch (e) { }
@@ -784,7 +792,7 @@ ${sec("排放与领取")}
  ${kpi("生产 NFT", fmt(nft && nft.minted && nft.minted.tokens, 0), "", nft && nft.minted ? `剩余额度 ${fmt(N(nft.minted.remainingCapacityDaiNow), 2)} DAI` : "", info("NFT 数量与剩余收益额度。", "/nft/{地址}"))}
  ${kpi("社区池累计记账", nft && nft.poolCredited ? fmt(N(nft.poolCredited.growth) + N(nft.poolCredited.network) + N(nft.poolCredited.consensus), 6) : "—", "AiLGNS", "增长 + 网络 + 共识", info("三条动态线给这个地址记入的收益。", "/nft/{地址} poolCredited"))}
 </div>
-${sec("每日获得明细", credits.length ? `共 ${credits.length} 条 · 合计 ${fmt(credits.reduce((s, c) => s + N(c.amount), 0), 4)} AiLGNS` : "")}
+${sec("每日获得明细", credits.length ? `共 ${credits.length} 天 · 合计 ${fmt(credits.reduce((s, c) => s + N(c.amount), 0), 4)} AiLGNS` : "")}
 ${credits.length ? `<div class="card p0"><table class="tbl"><thead><tr><th>#</th><th>时间（北京）</th><th class="r">当天获得 AiLGNS</th><th class="r">占累计</th><th>交易</th></tr></thead><tbody>${credits.slice(0, Math.max(20, x.creditLimit || 20)).map((c, i) => `<tr><td>${i + 1}</td><td class="mono">${bj(c.ts)}</td><td class="r"><b>${fmt(N(c.amount), 4)}</b></td><td class="r">${fin(creditedTotal) && creditedTotal > 0 ? (N(c.amount) / creditedTotal * 100).toFixed(2) + "%" : "—"}</td><td>${c.tx ? exLink("tx/" + c.tx, "↗") : ""}</td></tr>`).join("")}</tbody></table></div>${(x.creditLimit || 20) < credits.length || !x.creditFull ? `<div id="creditMore" class="note" style="text-align:center;padding:12px">${x.creditBusy ? "正在加载更多…" : "向下滚动加载更多…"}</div>` : ""}` : `<div class="card"><div class="empty">暂无每日记入记录</div></div>`}
 <p class="note">来自官方 /emission/{地址} 的 accrued.credits（只返回最近 30 条）；完整历史以获得总额为准。</p>
 ${sec("500 LGNS 销毁资格")}
