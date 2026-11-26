@@ -754,6 +754,10 @@ ${sec("排放与领取")}
  ${kpi("生产 NFT", fmt(nft && nft.minted && nft.minted.tokens, 0), "", nft && nft.minted ? `剩余额度 ${fmt(N(nft.minted.remainingCapacityDaiNow), 2)} DAI` : "", info("NFT 数量与剩余收益额度。", "/nft/{地址}"))}
  ${kpi("社区池累计记账", nft && nft.poolCredited ? fmt(N(nft.poolCredited.growth) + N(nft.poolCredited.network) + N(nft.poolCredited.consensus), 6) : "—", "AiLGNS", "增长 + 网络 + 共识", info("三条动态线给这个地址记入的收益。", "/nft/{地址} poolCredited"))}
 </div>
+${sec("每日获得明细", credits.length ? `最近 ${credits.length} 条 · 合计 ${fmt(credits.reduce((s, c) => s + N(c.amount), 0), 4)} AiLGNS` : "")}
+${credits.length ? `<div class="card"><h3>近 ${credits.length} 天每日获得（AiLGNS）</h3>${barChart(credits.slice().reverse().map(c => ({ v: N(c.amount), l: bj(c.ts, false).slice(0, 5) })), { fv: v => fmt(v, 4) + " AiLGNS", h: 180 })}</div>` : `<div class="card"><div class="empty">暂无每日记入记录</div></div>`}
+<div class="card p0 scroll maxh"><table class="tbl"><thead><tr><th>#</th><th>时间（北京）</th><th class="r">当天获得 AiLGNS</th><th class="r">占累计</th><th>交易</th></tr></thead><tbody>${credits.map((c, i) => `<tr><td>${i + 1}</td><td class="mono">${bj(c.ts)}</td><td class="r"><b>${fmt(N(c.amount), 4)}</b></td><td class="r">${fin(creditedTotal) && creditedTotal > 0 ? (N(c.amount) / creditedTotal * 100).toFixed(2) + "%" : "—"}</td><td>${c.tx ? exLink("tx/" + c.tx, "↗") : ""}</td></tr>`).join("") || `<tr><td colspan="5" class="empty">暂无数据</td></tr>`}</tbody></table></div>
+<p class="note">来自官方 /emission/{地址} 的 accrued.credits（只返回最近 30 条）；完整历史以获得总额为准。</p>
 ${sec("500 LGNS 销毁资格")}
 <div class="card">${Q.elig && Q.elig.addr && Q.elig.addr.toLowerCase() === x.a.toLowerCase() ? eligView(Q.elig) : `<div class="empty">正在读取…</div>`}</div>
 ${sec("链上活动", x.act ? `共 ${fmt(x.act.total, 0)} 条` : "")}
