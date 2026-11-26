@@ -674,6 +674,36 @@ function pageAddress(a) {
 <div class="card"><form class="form" id="addrForm"><input id="addrIn" placeholder="输入 0x 开头的钱包地址" value="${esc(Q.addrQ)}" autocomplete="off" spellcheck="false"><button class="btn">查询</button>${watchBtn(Q.addrQ)}</form></div>
 ${Q.addr ? addrView(Q.addr) : watchSection()}`;
 }
+async function fetchAllCreditActivities(a) {
+  const first = await api(`/activity/${a}?limit=100&offset=0`).catch(() => null);
+  if (!first) return [];
+  const total = Number(first.total) || 0, rows = [...(first.rows || [])];
+  const pages = Math.ceil(total / 100);
+  if (pages > 1) {
+    const rest = await Promise.all([...Array(pages - 1)].map((_, i) => api(`/activity/${a}?limit=100&offset=${(i + 1) * 100}`).catch(() => null)));
+    for (const j of rest) if (j) rows.push(...(j.rows || []));
+  }
+  const map = new Map();
+  for (const r of rows) if (r.module === "emission" && r.method === "ClaimCredited") map.set(r.tx || r.ts, { ts: r.ts, amount: r.amount, tx: r.tx });
+  return [...map.values()].sort((x, y) => new Date(y.ts) - new Date(x.ts));
+}
+async function loadMoreCredits() {
+  const x = Q.addr; if (!x || x.creditBusy) return;
+  if ((x.creditLimit || 20) < (x.credits || []).length) { x.creditLimit = (x.creditLimit || 20) + 20; render(); return; }
+  if (x.creditFull) return;
+  x.creditBusy = true; render();
+  try {
+    const all = await fetchAllCreditActivities(x.a);
+    const map = new Map();
+    for (const c of [...(x.credits || []), ...all]) map.set(c.tx || c.ts, c);
+    x.credits = [...map.values()].sort((a, b) => new Date(b.ts) - new Date(a.ts));
+    x.creditFull = true;
+    x.creditLimit = (x.creditLimit || 20) + 20;
+  } catch (e) { }
+  x.creditBusy = false;
+  render();
+}
+
 async function loadAddr(a, lim) {
   if (!isAddr(a)) { Q.addr = { error: "badaddr" }; render(); return; }
   if (!lim) { Q.addr = { loading: true }; render(); }
@@ -684,7 +714,7 @@ async function loadAddr(a, lim) {
     api(`/nft/${a}?limit=20`).catch(() => null), api(`/activity/${a}?limit=${L}`).catch(() => null), api("/turbine/" + a).catch(() => null), api("/ve/" + a).catch(() => null),
     fetch(`/api/zones?addr=${a}`, { credentials: "same-origin", headers: { accept: "application/json" } }).then(r => r.ok ? r.json() : null).catch(() => null)]);
   if (a !== Q.addrQ) return;
-  Q.addr = { a, bal: bal ? { ai: bal[0] ? U(W(bal[0], 0)) : null, lgns: bal[1] ? U(W(bal[1], 0), 9) : null, dai: bal[2] ? U(BigInt(bal[2])) : null, stake: bal[3] ? U(W(bal[3], 0), 9) : null, contract: bal[4] && bal[4] !== "0x" } : null, p, e, c, l, n, act, tbA, veA, z, lim: L };
+  Q.addr = { a, bal: bal ? { ai: bal[0] ? U(W(bal[0], 0)) : null, lgns: bal[1] ? U(W(bal[1], 0), 9) : null, dai: bal[2] ? U(BigInt(bal[2])) : null, stake: bal[3] ? U(W(bal[3], 0), 9) : null, contract: bal[4] && bal[4] !== "0x" } : null, p, e, c, l, n, act, tbA, veA, z, lim: L, credits: (e && e.accrued && e.accrued.credits) || [], creditLimit: 20, creditBusy: false, creditFull: false };
   if (!D.lv) api("/level").then(x => { if (x) { D.lv = x; if (route().p === "address") render(); } }).catch(() => { });
   if (route().p === "address") render();
   if (!lim && Q.eligAddr.toLowerCase() !== a.toLowerCase()) checkElig(a, false);
@@ -720,7 +750,7 @@ function addrView(x) {
   const b = x.bal || {}, ps = x.p && x.p.summary, pl = pricePool(), c = x.c, l = x.l, nft = x.n, e = x.e;
   const totalA = D.pw ? N(D.pw.totalActivePower) : null, act = ps ? N(ps.activePower) : null, last = lastEmDay();
   const estDay = fin(act) && fin(totalA) && last ? act / totalA * N(last.communityStatic) : null;
-  const credits = (e && e.accrued && e.accrued.credits) || [];
+  const credits = (x.credits && x.credits.length ? x.credits : (e && e.accrued && e.accrued.credits) || []);
   const lastCredit = credits[0] || null;
   const creditedTotal = e && e.accrued ? N(e.accrued.creditedTotal) : null;
   const consumedTotal = e && e.accrued ? N(e.accrued.consumedTotal) : null;
@@ -754,8 +784,8 @@ ${sec("排放与领取")}
  ${kpi("生产 NFT", fmt(nft && nft.minted && nft.minted.tokens, 0), "", nft && nft.minted ? `剩余额度 ${fmt(N(nft.minted.remainingCapacityDaiNow), 2)} DAI` : "", info("NFT 数量与剩余收益额度。", "/nft/{地址}"))}
  ${kpi("社区池累计记账", nft && nft.poolCredited ? fmt(N(nft.poolCredited.growth) + N(nft.poolCredited.network) + N(nft.poolCredited.consensus), 6) : "—", "AiLGNS", "增长 + 网络 + 共识", info("三条动态线给这个地址记入的收益。", "/nft/{地址} poolCredited"))}
 </div>
-${sec("每日获得明细", credits.length ? `最近 ${credits.length} 条 · 合计 ${fmt(credits.reduce((s, c) => s + N(c.amount), 0), 4)} AiLGNS` : "")}
-${credits.length ? `<div class="card p0"><table class="tbl"><thead><tr><th>#</th><th>时间（北京）</th><th class="r">当天获得 AiLGNS</th><th class="r">占累计</th><th>交易</th></tr></thead><tbody>${credits.map((c, i) => `<tr><td>${i + 1}</td><td class="mono">${bj(c.ts)}</td><td class="r"><b>${fmt(N(c.amount), 4)}</b></td><td class="r">${fin(creditedTotal) && creditedTotal > 0 ? (N(c.amount) / creditedTotal * 100).toFixed(2) + "%" : "—"}</td><td>${c.tx ? exLink("tx/" + c.tx, "↗") : ""}</td></tr>`).join("")}</tbody></table></div>` : `<div class="card"><div class="empty">暂无每日记入记录</div></div>`}
+${sec("每日获得明细", credits.length ? `共 ${credits.length} 条 · 合计 ${fmt(credits.reduce((s, c) => s + N(c.amount), 0), 4)} AiLGNS` : "")}
+${credits.length ? `<div class="card p0"><table class="tbl"><thead><tr><th>#</th><th>时间（北京）</th><th class="r">当天获得 AiLGNS</th><th class="r">占累计</th><th>交易</th></tr></thead><tbody>${credits.slice(0, Math.max(20, x.creditLimit || 20)).map((c, i) => `<tr><td>${i + 1}</td><td class="mono">${bj(c.ts)}</td><td class="r"><b>${fmt(N(c.amount), 4)}</b></td><td class="r">${fin(creditedTotal) && creditedTotal > 0 ? (N(c.amount) / creditedTotal * 100).toFixed(2) + "%" : "—"}</td><td>${c.tx ? exLink("tx/" + c.tx, "↗") : ""}</td></tr>`).join("")}</tbody></table></div>${(x.creditLimit || 20) < credits.length || !x.creditFull ? `<div id="creditMore" class="note" style="text-align:center;padding:12px">${x.creditBusy ? "正在加载更多…" : "向下滚动加载更多…"}</div>` : ""}` : `<div class="card"><div class="empty">暂无每日记入记录</div></div>`}
 <p class="note">来自官方 /emission/{地址} 的 accrued.credits（只返回最近 30 条）；完整历史以获得总额为准。</p>
 ${sec("500 LGNS 销毁资格")}
 <div class="card">${Q.elig && Q.elig.addr && Q.elig.addr.toLowerCase() === x.a.toLowerCase() ? eligView(Q.elig) : `<div class="empty">正在读取…</div>`}</div>
@@ -1156,6 +1186,12 @@ function bindPage(p) {
   const bq = $("#bdQ"); if (bq) bq.oninput = () => { Q.burnSearch = bq.value; clearTimeout(bq._t); bq._t = setTimeout(render, 250); };
   const ef = $("#eligForm"); if (ef) ef.onsubmit = e => { e.preventDefault(); checkElig($("#eligIn").value); };
   const af = $("#addrForm"); if (af) af.onsubmit = e => { e.preventDefault(); const v = $("#addrIn").value.trim(); if (isAddr(v)) { if (v === Q.addrQ) { Q.addrQ = ""; } location.hash = "#/address/" + v; render(); } else $("#addrIn").classList.add("err"); };
+  const cm = $("#creditMore");
+  if (cm) {
+    if (window.__creditObs) window.__creditObs.disconnect();
+    window.__creditObs = new IntersectionObserver(es => { if (es[0] && es[0].isIntersecting) loadMoreCredits(); }, { rootMargin: "260px" });
+    window.__creditObs.observe(cm);
+  }
   const am = $("[data-act-more]"); if (am && Q.addr) am.onclick = () => { am.textContent = "加载中…"; loadAddr(Q.addr.a, (Q.addr.lim || 40) + 40); };
   const hm = $("#hMore"); if (hm) hm.onclick = () => loadHolders(true);
   const pr = $("#permReload"); if (pr) pr.onclick = () => { Q.perms = null; loadPerms(); };
