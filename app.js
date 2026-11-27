@@ -965,7 +965,10 @@ async function loadLevelRewards() {
   if (route().p === "levels") render();
 }
 function levelRewardsHtml() {
-  const R = Q.lvRewards;
+  const L = D.lvl;
+  const pre = L ? L.rows.filter(r => r.level > 0 && r.rw).map(r => ({ a: r.a, level: r.level, g: r.rw.g, n: r.rw.n, c: r.rw.c, d: r.rw.d })) : [];
+  const allPre = L && pre.length > 0 && pre.length === L.rows.filter(r => r.level > 0).length;
+  const R = allPre ? { loading: false, rows: pre.sort((x, y) => (y.g + y.n + y.c) - (x.g + x.n + x.c)), day: pre[0] && pre[0].d, at: L.at } : Q.lvRewards;
   if (R.loading) return `<div class="mt"><div class="empty">正在读取 ${R.done}/${R.total} 个 P 等级地址的每日奖励…</div></div>`;
   if (R.error) return `<div class="verdict no">读取失败：${esc(R.error)}</div>`;
   if (!R.rows || !R.rows.length) return `<div class="mt"><div class="empty">暂无奖励数据</div></div>`;
@@ -994,8 +997,9 @@ ${sec(Q.lvTab === "rewards" ? "每日奖励榜" : "各级成员", Q.lvTab === "r
   if (q) rows = rows.filter(r => r.a.includes(q));
   const tabs = [["rewards", "每日奖励榜"], ["all", `全部 P1+（${L.rows.length}）`], ...lvls.map(l => [String(l), `P${l}（${L.rows.filter(r => r.level === l).length}）`]), ["near", `接近 P1（${L.near.length}）`]];
   if (cur === "rewards") {
-    if (!Q.lvRewards.at && !Q.lvRewards.loading) setTimeout(loadLevelRewards, 0);
-    return html + `<div class="card"><div class="row"><div class="seg" id="lvSeg">${tabs.map(([k, n]) => `<button data-lv="${k}" class="${cur === k ? "on" : ""}">${n}</button>`).join("")}</div><span style="flex:1"></span><button class="btn gh sm" id="lvRwReload" ${Q.lvRewards.loading ? "disabled" : ""}>刷新</button></div>${levelRewardsHtml()}<p class="note">奖励来自官方 /community/{地址} 的最新一天记录；排行榜按「增长 + 网络 + 共识」合计从高到低。</p></div>`;
+    const totalP = L.rows.filter(r => r.level > 0).length, preP = L.rows.filter(r => r.level > 0 && r.rw).length, allPre = totalP > 0 && preP === totalP;
+    if (!allPre && !Q.lvRewards.at && !Q.lvRewards.loading) setTimeout(loadLevelRewards, 0);
+    return html + `<div class="card"><div class="row"><div class="seg" id="lvSeg">${tabs.map(([k, n]) => `<button data-lv="${k}" class="${cur === k ? "on" : ""}">${n}</button>`).join("")}</div><span style="flex:1"></span>${allPre ? `<span class="tag il">后台更新 · ${bj(Math.floor(L.at / 1000), false)}</span>` : `<button class="btn gh sm" id="lvRwReload" ${Q.lvRewards.loading ? "disabled" : ""}>刷新</button>`}</div>${levelRewardsHtml()}<p class="note">奖励来自官方 /community/{地址} 的最新一天记录；排行榜按「增长 + 网络 + 共识」合计从高到低。${allPre ? "已随每 30 分钟构建预计算，打开即显示。" : ""}</p></div>`;
   }
   return html + `<div class="card"><div class="row"><div class="seg" id="lvSeg">${tabs.map(([k, n]) => `<button data-lv="${k}" class="${cur === k ? "on" : ""}">${n}</button>`).join("")}</div><input id="lvQ" class="ml" style="height:30px;padding:0 10px;border:1px solid var(--line);border-radius:5px;background:var(--panel);color:var(--ink);font:12px var(--mono);min-width:200px" placeholder="搜地址（部分即可）" value="${esc(Q.lvQ || "")}" autocomplete="off"><button class="btn gh sm" data-csv="levels">导出 CSV</button></div>
 <div class="scroll maxh mt"><table class="tbl"><thead><tr><th>#</th><th>地址</th><th>等级</th><th class="r">锁仓价值 $</th><th class="r">自身算力</th><th class="r">大区</th><th class="r">二区</th><th class="r">三区</th><th class="r">团队</th><th class="r">直推</th><th>升下一级</th></tr></thead><tbody>${rows.slice(0, 500).map((r, i) => {

@@ -334,6 +334,19 @@ async function refreshLevels(force) {
   process.stdout.write("\n");
   const th = await getJ(`${API}/level`).catch(() => null);
   rows.sort((a, b) => b.level - a.level || b.veUsd - a.veUsd); near.sort((a, b) => b.veUsd - a.veUsd);
+  // 每日奖励（增长/网络/共识）：给 P1+ 每个地址拉 /community 最新一天，供等级页排行榜直接使用
+  let rwOk = 0;
+  await pool(rows, 20, async r => {
+    try {
+      const c = await getJ(`${API}/community/${r.a}`);
+      const x = c && c.latest;
+      if (x) {
+        r.rw = { d: x.day, g: +(x.rewardGrowth || 0), n: +(x.rewardNetwork || 0), c: +(x.rewardConsensus || 0) };
+        rwOk++;
+      }
+    } catch (e) { }
+  });
+  log(`每日奖励：${rwOk}/${rows.length} 个 P 等级地址`);
   S.levels = { at: Date.now(), checked: cand.length, fail, thresholds: th && th.thresholds || null, official: th && th.distribution || null, rows, near: near.slice(0, 300) };
   S.levelsAt = Date.now();
   writeJSON(path.join(DATA, "levels.json"), S.levels);
