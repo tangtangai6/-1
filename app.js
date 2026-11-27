@@ -99,7 +99,7 @@ const call = (to, sel, ...args) => ({ to, data: SEL[sel] + args.map(a => typeof 
 
 /* ================= 数据层 ================= */
 const D = { at: 0, health: {} };
-const Q = { burnDay: 0, burners: {}, elig: null, eligAddr: "", addr: null, addrQ: "", holders: [], holdersNext: null, holdersBusy: false, rank: "day", rankData: {}, kline: "1h", klineData: {}, burnSearch: "", calc: {}, perms: null, permsBusy: false, actOff: 0, team: { addr: "", for: "", win: "d7", data: null, loading: false, err: "", q: "", sort: "dai", dir: -1, open: [false, false, false, false], bpage: [0, 0, 0, 0], started: 0, tick: null } };
+const Q = { burnDay: 0, burners: {}, elig: null, eligAddr: "", addr: null, addrQ: "", holders: [], holdersNext: null, holdersBusy: false, rank: "day", rankData: {}, kline: "1h", klineData: {}, burnSearch: "", calc: {}, perms: null, permsBusy: false, actOff: 0, team: { addr: "", for: "", win: "d7", data: null, loading: false, err: "", q: "", sort: "dai", dir: -1, open: [false, false, false, false], bpage: [0, 0, 0, 0], started: 0, tick: null }, lvRewards: { at: 0, rows: null, loading: false, done: 0, total: 0, day: null, error: "" } };
 const HN = { ov: "官方 /overview", feed: "官方 /overview/feed", pw: "官方 /power", em: "官方 /emission", pr: "官方 /protocol", ve: "官方 /ve", pools: "官方 /pools", tb: "官方 /turbine", pol: "官方 /pol", lv: "官方 /level", price: "官方 /price", ga: "官方 /gauge", k1: "官方 /kline", ch: "Anubis 链 RPC", hc: "Blockscout", my: "本地采集器" };
 async function safe(name, fn) { const t = Date.now(); try { const v = await fn(); D.health[name] = { ok: true, ms: Date.now() - t }; return v; } catch (e) { D.health[name] = { ok: false, ms: Date.now() - t, err: String(e.message || e) }; return null; } }
 
@@ -938,6 +938,42 @@ ${sec("层级分布", `从根地址往下第几层有多少人 · 共 ${cm.maxDe
 <p class="note">数据：本地采集器扫描 Community 合约全部 Joined 事件（${fmt(cm.total, 0)} 个地址${cm.dup ? `，忽略重复绑定 ${fmt(cm.dup, 0)} 次` : ""}）。官方接口的直推列表最多只给 20 条，无法遍历整棵树，所以必须扫链。</p>`;
 }
 
+async function loadLevelRewards() {
+  const L = D.lvl;
+  if (!L || Q.lvRewards.loading) return;
+  const list = L.rows.filter(r => r.level > 0);
+  const lvMap = new Map(list.map(r => [r.a, r.level]));
+  Q.lvRewards = { at: 0, rows: null, loading: true, done: 0, total: list.length, day: null, error: "" };
+  if (route().p === "levels") render();
+  const out = [];
+  let done = 0, i = 0;
+  const worker = async () => {
+    while (i < list.length) {
+      const a = list[i++].a;
+      try {
+        const c = await api("/community/" + a);
+        const x = c && c.latest;
+        if (x) out.push({ a, level: lvMap.get(a) || 0, g: N(x.rewardGrowth) || 0, n: N(x.rewardNetwork) || 0, c: N(x.rewardConsensus) || 0, d: x.day });
+      } catch (e) { }
+      done++; Q.lvRewards.done = done;
+      if (done % 20 === 0 && route().p === "levels" && Q.lvTab === "rewards") render();
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(20, list.length) }, worker));
+  out.sort((x, y) => (y.g + y.n + y.c) - (x.g + x.n + x.c));
+  Q.lvRewards = { at: Date.now(), rows: out, loading: false, done, total: list.length, day: out[0] ? out[0].d : null, error: "" };
+  if (route().p === "levels") render();
+}
+function levelRewardsHtml() {
+  const R = Q.lvRewards;
+  if (R.loading) return `<div class="mt"><div class="empty">正在读取 ${R.done}/${R.total} 个 P 等级地址的每日奖励…</div></div>`;
+  if (R.error) return `<div class="verdict no">读取失败：${esc(R.error)}</div>`;
+  if (!R.rows || !R.rows.length) return `<div class="mt"><div class="empty">暂无奖励数据</div></div>`;
+  const sum = R.rows.reduce((s, r) => ({ g: s.g + r.g, n: s.n + r.n, c: s.c + r.c }), { g: 0, n: 0, c: 0 });
+  const total = r => r.g + r.n + r.c;
+  return `<div class="scroll maxh mt"><table class="tbl"><thead><tr><th>#</th><th>地址</th><th>等级</th><th class="r">增长</th><th class="r">网络</th><th class="r">共识</th><th class="r">合计</th><th class="r">协议日</th></tr></thead><tbody>${R.rows.map((r, i) => `<tr><td>${i + 1}</td><td>${addrLink(r.a)}</td><td>${lvPill(r.level)}</td><td class="r">${fmt(r.g, 6)}</td><td class="r">${fmt(r.n, 6)}</td><td class="r">${fmt(r.c, 6)}</td><td class="r"><b>${fmt(total(r), 6)}</b></td><td class="r">${fmt(r.d, 0)}</td></tr>`).join("")}<tr class="tot"><td colspan="3">合计（${R.rows.length} 人）</td><td class="r">${fmt(sum.g, 6)}</td><td class="r">${fmt(sum.n, 6)}</td><td class="r">${fmt(sum.c, 6)}</td><td class="r"><b>${fmt(sum.g + sum.n + sum.c, 6)}</b></td><td></td></tr></tbody></table></div>`;
+}
+
 function pageLevels() {
   const lv = D.lv, L = D.lvl, head = ph("社区等级分布", "P1–P7 各级人数与钱包地址、锁仓与三区业绩、升级还差多少。", L ? `<span class="tag il">名单 ${bj(Math.floor(L.at / 1000))} 查询</span>` : "");
   const dist = lv && lv.distribution || [], th = (lv && lv.thresholds) || (L && L.thresholds) || [], p1 = dist.filter(d => d.level > 0).reduce((s, d) => s + d.members, 0);
@@ -951,12 +987,16 @@ function pageLevels() {
 ${sec("等级门槛与人数", "官方 /level 实时")}
 <div class="card p0 scroll"><table class="tbl"><thead><tr><th>等级</th><th class="r">人数</th><th class="r">占 P1+</th><th class="r">锁仓价值 ≥</th><th class="r">区业绩 ≥</th><th>其它条件</th><th style="width:28%"></th></tr></thead><tbody>${dist.filter(d => d.level > 0).map(d => { const t = thOf(d.level) || {}; return `<tr><td>${lvPill(d.level)}</td><td class="r">${fmt(d.members, 0)}</td><td class="r">${p1 ? (d.members / p1 * 100).toFixed(1) + "%" : "—"}</td><td class="r">$${fmt(N(t.veUsd), 0)}</td><td class="r">${t.zoneUsd != null ? "$" + fmt(N(t.zoneUsd), 0) : "—"}</td><td>${t.contains != null ? `伞下含 P${t.contains}` : ""}</td><td><div class="bar" style="margin:0"><i style="width:${p1 ? d.members / p1 * 100 : 0}%"></i></div></td></tr>`; }).join("") || `<tr><td colspan="7" class="empty">${loadingTxt()}</td></tr>`}</tbody></table></div>
 <p class="note">门槛为官方接口返回的原始数值。「区业绩」对应官方三区业绩（大区 / 二区 / 三区），具体怎样算达标以官方规则为准，本页只做对照。</p>
-${sec("各级成员", "钱包地址、锁仓、三区业绩")}`;
+${sec(Q.lvTab === "rewards" ? "每日奖励榜" : "各级成员", Q.lvTab === "rewards" ? "P1+ 每日增长 / 网络 / 共识奖励排行" : "钱包地址、锁仓、三区业绩")}`;
   if (!L) return html + localBox("等级成员名单");
   const lvls = [...new Set(L.rows.map(r => r.level))].sort((a, b) => b - a), cur = Q.lvTab || "all", q = (Q.lvQ || "").trim().toLowerCase();
   let rows = cur === "near" ? L.near : cur === "all" ? L.rows : L.rows.filter(r => r.level === +cur);
   if (q) rows = rows.filter(r => r.a.includes(q));
-  const tabs = [["all", `全部 P1+（${L.rows.length}）`], ...lvls.map(l => [String(l), `P${l}（${L.rows.filter(r => r.level === l).length}）`]), ["near", `接近 P1（${L.near.length}）`]];
+  const tabs = [["rewards", "每日奖励榜"], ["all", `全部 P1+（${L.rows.length}）`], ...lvls.map(l => [String(l), `P${l}（${L.rows.filter(r => r.level === l).length}）`]), ["near", `接近 P1（${L.near.length}）`]];
+  if (cur === "rewards") {
+    if (!Q.lvRewards.at && !Q.lvRewards.loading) setTimeout(loadLevelRewards, 0);
+    return html + `<div class="card"><div class="row"><div class="seg" id="lvSeg">${tabs.map(([k, n]) => `<button data-lv="${k}" class="${cur === k ? "on" : ""}">${n}</button>`).join("")}</div><span style="flex:1"></span><button class="btn gh sm" id="lvRwReload" ${Q.lvRewards.loading ? "disabled" : ""}>刷新</button></div>${levelRewardsHtml()}<p class="note">奖励来自官方 /community/{地址} 的最新一天记录；排行榜按「增长 + 网络 + 共识」合计从高到低。</p></div>`;
+  }
   return html + `<div class="card"><div class="row"><div class="seg" id="lvSeg">${tabs.map(([k, n]) => `<button data-lv="${k}" class="${cur === k ? "on" : ""}">${n}</button>`).join("")}</div><input id="lvQ" class="ml" style="height:30px;padding:0 10px;border:1px solid var(--line);border-radius:5px;background:var(--panel);color:var(--ink);font:12px var(--mono);min-width:200px" placeholder="搜地址（部分即可）" value="${esc(Q.lvQ || "")}" autocomplete="off"><button class="btn gh sm" data-csv="levels">导出 CSV</button></div>
 <div class="scroll maxh mt"><table class="tbl"><thead><tr><th>#</th><th>地址</th><th>等级</th><th class="r">锁仓价值 $</th><th class="r">自身算力</th><th class="r">大区</th><th class="r">二区</th><th class="r">三区</th><th class="r">团队</th><th class="r">直推</th><th>升下一级</th></tr></thead><tbody>${rows.slice(0, 500).map((r, i) => {
     const t = thOf((r.level || 0) + 1), gap = t ? N(t.veUsd) - r.veUsd : null, zOk = t && t.zoneUsd != null ? r.zones.filter(z => z >= N(t.zoneUsd)).length : null;
@@ -964,61 +1004,6 @@ ${sec("各级成员", "钱包地址、锁仓、三区业绩")}`;
   }).join("") || `<tr><td colspan="11" class="empty">没有符合的地址</td></tr>`}</tbody></table></div>
 ${rows.length > 500 ? `<p class="note">只显示前 500 条，导出 CSV 可拿全部。</p>` : ""}
 <p class="note">「接近 P1」= 锁仓价值 ≥ $500 但还没有等级的地址（按锁仓价值排序，最多 300 个）。团队人数来自采集器推荐树；锁仓价值、自身算力、三区业绩来自官方 /level/{地址}。</p></div>`;
-}
-
-/* ================= 团队新增业绩（Worker API） ================= */
-const TEAM_WIN = [["d0", "今天"], ["d1", "昨天"], ["d7", "近 7 天"]];
-const TEAM_COLS = [["joins", "新加入", 0], ["dai", "入金 DAI", 2], ["power", "新增算力", -1], ["turbDai", "涡轮 DAI", 2], ["veAi", "锁仓 AiLGNS", 4], ["burnLgns", "销毁 LGNS", 0]];
-const TEAM_BUCKETS = [["≥ 1 万", 10000, Infinity], ["5 千 – 1 万", 5000, 10000], ["1 千 – 5 千", 1000, 5000], ["< 1 千", -Infinity, 1000]];
-
-function zeroM() { return { joins: 0, dai: 0, power: 0, turbDai: 0, turbAi: 0, burnCnt: 0, burnLgns: 0, veAi: 0, fundDai: 0 }; }
-function teamLines(rows, w) {
-  const map = new Map();
-  for (const r of rows) {
-    const k = r.line || "";
-    let x = map.get(k);
-    if (!x) map.set(k, x = { a: r.line || null, n: 0, m: zeroM() });
-    x.n++;
-    for (const kk in x.m) x.m[kk] += (r[w][kk] || 0);
-  }
-  return [...map.values()].sort((a, b) => b.m.dai - a.m.dai);
-}
-function teamVal(r, k, d) { return d < 0 ? cp(r[k]) : fmt(r[k], d); }
-async function loadTeam(addr) {
-  addr = String(addr || "").toLowerCase();
-  if (!isAddr(addr)) return;
-  Q.team.addr = addr; Q.team.for = ""; Q.team.data = null; Q.team.loading = true; Q.team.err = ""; Q.team.open = [false, false, false, false]; Q.team.bpage = [0, 0, 0, 0];
-  Q.team.started = Date.now();
-  if (route().p === "growth") render();
-  const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 90000);
-  try {
-    const r = await fetch(`/api/team?addr=${addr}`, { credentials: "same-origin", headers: { accept: "application/json" }, signal: ctl.signal });
-    if (r.status === 401) { location.href = "/login"; return; }
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
-    Q.team.data = j; Q.team.for = addr;
-  } catch (e) {
-    Q.team.err = (e && e.name === "AbortError") ? "查询超时（90 秒）。这个团队太大，建议改查它的某个直推线地址。" : /50[34]/.test(String(e && e.message)) ? "服务器计算超时（HTTP 503）。这个团队太大，建议改查它的某个直推线地址。" : String((e && e.message) || e);
-  } finally { clearTimeout(to); }
-  Q.team.loading = false;
-  if (route().p === "growth") render();
-}
-function teamCsv() {
-  const d = Q.team.data; if (!d || !d.rows) return;
-  const w = Q.team.win, q = (Q.team.q || "").trim().toLowerCase();
-  let list = q ? d.rows.filter(r => r.a.includes(q)) : d.rows.slice();
-  list.sort((a, b) => { const x = a[w][Q.team.sort] || 0, y = b[w][Q.team.sort] || 0; return Q.team.dir > 0 ? x - y : y - x; });
-  const H = ["分区", "直推线", "地址", ...TEAM_COLS.map(c => c[1])], out = [];
-  for (const [name, lo, hi] of TEAM_BUCKETS) for (const r of list) { const v = r[w].dai || 0; if (v >= lo && v < hi) out.push([name, r.line, r.a, ...TEAM_COLS.map(([k]) => r[w][k] ?? 0)]); }
-  csvDownload(`团队新增_${w}_${d.addr.slice(0, 8)}.csv`, [H, ...out]);
-}
-function teamLineCsv() {
-  const d = Q.team.data; if (!d) return;
-  const w = Q.team.win, q = (Q.team.q || "").trim().toLowerCase();
-  const list = q ? (d.rows || []).filter(r => r.a.includes(q)) : (d.rows || []);
-  const lines = d.lineSummary ? d.lineSummary.map(x => ({ a: x.line, n: x.n, m: x.m })) : teamLines(list, w);
-  const H = ["直推线", "人数", "入金 DAI", "新加入", "新增算力", "涡轮 DAI", "锁仓 AiLGNS"];
-  csvDownload(`直推线汇总_${w}_${d.addr.slice(0, 8)}.csv`, [H, ...lines.map(l => [l.a || "未知", l.n, +l.m.dai.toFixed(6), l.m.joins, +l.m.power.toFixed(6), +l.m.turbDai.toFixed(6), +l.m.veAi.toFixed(6)])]);
 }
 
 function pageGrowth(arg) {
@@ -1201,6 +1186,7 @@ function bindPage(p) {
   // 第二期页面
   $$("#cmSeg [data-cm]").forEach(b => b.onclick = () => { Q.cmTab = b.dataset.cm; render(); });
   $$("#lvSeg [data-lv]").forEach(b => b.onclick = () => { Q.lvTab = b.dataset.lv; render(); });
+  const lrr = $("#lvRwReload"); if (lrr) lrr.onclick = () => { Q.lvRewards = { at: 0, rows: null, loading: false, done: 0, total: 0, day: null, error: "" }; loadLevelRewards(); };
   const lq = $("#lvQ"); if (lq) lq.oninput = () => { Q.lvQ = lq.value; clearTimeout(lq._t); lq._t = setTimeout(render, 250); };
   const tf = $("#teamForm"); if (tf) tf.onsubmit = e => { e.preventDefault(); const v = $("#teamIn").value.trim().toLowerCase(); if (!isAddr(v)) return $("#teamIn").classList.add("err"); if (location.hash !== "#/growth/" + v) location.hash = "#/growth/" + v; else loadTeam(v); };
   $$("#teamSeg [data-tw]").forEach(b => b.onclick = () => { Q.team.win = b.dataset.tw; Q.team.bpage = [0, 0, 0, 0]; render(); });
