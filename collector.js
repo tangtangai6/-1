@@ -334,23 +334,28 @@ async function refreshLevels(force) {
   process.stdout.write("\n");
   const th = await getJ(`${API}/level`).catch(() => null);
   rows.sort((a, b) => b.level - a.level || b.veUsd - a.veUsd); near.sort((a, b) => b.veUsd - a.veUsd);
-  // 每日奖励（增长/网络/共识）：给 P1+ 每个地址拉 /community 最新一天，供等级页排行榜直接使用
-  let rwOk = 0;
-  await pool(rows, 20, async r => {
+  S.levels = { at: Date.now(), checked: cand.length, fail, thresholds: th && th.thresholds || null, official: th && th.distribution || null, rows, near: near.slice(0, 300) };
+  S.levelsAt = Date.now();
+  writeJSON(path.join(DATA, "levels.json"), S.levels);
+  log(`等级完成：P1+ 共 ${rows.length} 人（官方统计 ${th ? th.distribution.filter(x => x.level > 0).reduce((s, x) => s + x.members, 0) : "?"} 人），失败 ${fail}`);
+}
+
+async function enrichLevelRewards() {
+  const L = S.levels;
+  if (!L || !L.rows || !L.rows.length) return;
+  let ok = 0;
+  await pool(L.rows, 20, async r => {
     try {
       const c = await getJ(`${API}/community/${r.a}`);
       const x = c && c.latest;
       if (x) {
         r.rw = { d: x.day, g: +(x.rewardGrowth || 0), n: +(x.rewardNetwork || 0), c: +(x.rewardConsensus || 0) };
-        rwOk++;
+        ok++;
       }
     } catch (e) { }
   });
-  log(`每日奖励：${rwOk}/${rows.length} 个 P 等级地址`);
-  S.levels = { at: Date.now(), checked: cand.length, fail, thresholds: th && th.thresholds || null, official: th && th.distribution || null, rows, near: near.slice(0, 300) };
-  S.levelsAt = Date.now();
-  writeJSON(path.join(DATA, "levels.json"), S.levels);
-  log(`等级完成：P1+ 共 ${rows.length} 人（官方统计 ${th ? th.distribution.filter(x => x.level > 0).reduce((s, x) => s + x.members, 0) : "?"} 人），失败 ${fail}`);
+  writeJSON(path.join(DATA, "levels.json"), L);
+  log(`每日奖励：${ok}/${L.rows.length} 个 P 等级地址`);
 }
 
 async function snapshotAndChanges(cm) {
@@ -492,6 +497,7 @@ async function cycle() {
     const cm = buildCommunity();
     log(`社区成员 ${cm.total.toLocaleString()}（迁移导入 ${cm.imported.toLocaleString()} · 新加入 ${cm.joinedNew.toLocaleString()}）· 最深 ${cm.maxDepth} 层 · 第 ${cm.curDay} 天新加入 ${(cm.daily.find(d => d.day === cm.curDay) || { joins: 0 }).joins}`);
     await refreshLevels();
+    await enrichLevelRewards();
     buildCommunity(); // 带上等级再写一次
     await snapshotAndChanges(cm);
     S.lastBuild = Date.now();
