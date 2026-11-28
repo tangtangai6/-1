@@ -1010,6 +1010,62 @@ ${rows.length > 500 ? `<p class="note">只显示前 500 条，导出 CSV 可拿�
 <p class="note">「接近 P1」= 锁仓价值 ≥ $500 但还没有等级的地址（按锁仓价值排序，最多 300 个）。团队人数来自采集器推荐树；锁仓价值、自身算力、三区业绩来自官方 /level/{地址}。</p></div>`;
 }
 
+/* ================= 团队新增业绩（Worker API） ================= */
+const TEAM_WIN = [["d0", "今天"], ["d1", "昨天"], ["d7", "近 7 天"]];
+const TEAM_COLS = [["joins", "新加入", 0], ["dai", "入金 DAI", 2], ["power", "新增算力", -1], ["turbDai", "涡轮 DAI", 2], ["veAi", "锁仓 AiLGNS", 4], ["burnLgns", "销毁 LGNS", 0]];
+const TEAM_BUCKETS = [["≥ 1 万", 10000, Infinity], ["5 千 – 1 万", 5000, 10000], ["1 千 – 5 千", 1000, 5000], ["< 1 千", -Infinity, 1000]];
+
+function zeroM() { return { joins: 0, dai: 0, power: 0, turbDai: 0, turbAi: 0, burnCnt: 0, burnLgns: 0, veAi: 0, fundDai: 0 }; }
+function teamLines(rows, w) {
+  const map = new Map();
+  for (const r of rows) {
+    const k = r.line || "";
+    let x = map.get(k);
+    if (!x) map.set(k, x = { a: r.line || null, n: 0, m: zeroM() });
+    x.n++;
+    for (const kk in x.m) x.m[kk] += (r[w][kk] || 0);
+  }
+  return [...map.values()].sort((a, b) => b.m.dai - a.m.dai);
+}
+function teamVal(r, k, d) { return d < 0 ? cp(r[k]) : fmt(r[k], d); }
+async function loadTeam(addr) {
+  addr = String(addr || "").toLowerCase();
+  if (!isAddr(addr)) return;
+  Q.team.addr = addr; Q.team.for = ""; Q.team.data = null; Q.team.loading = true; Q.team.err = ""; Q.team.open = [false, false, false, false]; Q.team.bpage = [0, 0, 0, 0];
+  Q.team.started = Date.now();
+  if (route().p === "growth") render();
+  const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 90000);
+  try {
+    const r = await fetch(`/api/team?addr=${addr}`, { credentials: "same-origin", headers: { accept: "application/json" }, signal: ctl.signal });
+    if (r.status === 401) { location.href = "/login"; return; }
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+    Q.team.data = j; Q.team.for = addr;
+  } catch (e) {
+    Q.team.err = (e && e.name === "AbortError") ? "查询超时（90 秒）。这个团队太大，建议改查它的某个直推线地址。" : /50[34]/.test(String(e && e.message)) ? "服务器计算超时（HTTP 503）。这个团队太大，建议改查它的某个直推线地址。" : String((e && e.message) || e);
+  } finally { clearTimeout(to); }
+  Q.team.loading = false;
+  if (route().p === "growth") render();
+}
+function teamCsv() {
+  const d = Q.team.data; if (!d || !d.rows) return;
+  const w = Q.team.win, q = (Q.team.q || "").trim().toLowerCase();
+  let list = q ? d.rows.filter(r => r.a.includes(q)) : d.rows.slice();
+  list.sort((a, b) => { const x = a[w][Q.team.sort] || 0, y = b[w][Q.team.sort] || 0; return Q.team.dir > 0 ? x - y : y - x; });
+  const H = ["分区", "直推线", "地址", ...TEAM_COLS.map(c => c[1])], out = [];
+  for (const [name, lo, hi] of TEAM_BUCKETS) for (const r of list) { const v = r[w].dai || 0; if (v >= lo && v < hi) out.push([name, r.line, r.a, ...TEAM_COLS.map(([k]) => r[w][k] ?? 0)]); }
+  csvDownload(`团队新增_${w}_${d.addr.slice(0, 8)}.csv`, [H, ...out]);
+}
+function teamLineCsv() {
+  const d = Q.team.data; if (!d) return;
+  const w = Q.team.win, q = (Q.team.q || "").trim().toLowerCase();
+  const list = q ? (d.rows || []).filter(r => r.a.includes(q)) : (d.rows || []);
+  const lines = d.lineSummary ? d.lineSummary.map(x => ({ a: x.line, n: x.n, m: x.m })) : teamLines(list, w);
+  const H = ["直推线", "人数", "入金 DAI", "新加入", "新增算力", "涡轮 DAI", "锁仓 AiLGNS"];
+  csvDownload(`直推线汇总_${w}_${d.addr.slice(0, 8)}.csv`, [H, ...lines.map(l => [l.a || "未知", l.n, +l.m.dai.toFixed(6), l.m.joins, +l.m.power.toFixed(6), +l.m.turbDai.toFixed(6), +l.m.veAi.toFixed(6)])]);
+}
+
+
 function pageGrowth(arg) {
   if (isAddr(arg) && arg.toLowerCase() !== Q.team.addr) { Q.team.addr = arg.toLowerCase(); Q.team.for = ""; Q.team.data = null; Q.team.err = ""; }
   const head = ph("团队新增业绩", "输入任意地址，看它伞下今天 / 昨天 / 近 7 天的新增，按入金分成 4 个分区。");
